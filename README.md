@@ -82,10 +82,6 @@ Sign in with the owner account, then open **Settings** to set your gym name, cur
 2. On [vercel.com](https://vercel.com) choose **Add New → Project**, import the repo, and add the three environment variables from `.env.local` (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `OWNER_EMAILS`).
 3. Deploy. In Supabase → **Authentication → URL Configuration**, set the Site URL to your Vercel address.
 
-### Keep the free Supabase project awake
-
-Supabase pauses free projects after about a week without activity. The GitHub Action in `.github/workflows/keep-alive.yml` pings it every 3 days. Turn it on by adding two repository secrets in GitHub (**Settings → Secrets and variables → Actions**): `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`. Run it once by hand from the **Actions** tab to check.
-
 ## Tests
 
 ```bash
