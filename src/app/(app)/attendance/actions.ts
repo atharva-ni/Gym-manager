@@ -67,3 +67,21 @@ export async function checkOut(id: string): Promise<ActionState> {
   const res = await runMutation((sb) => sb.from("attendance").update({ check_out: new Date().toISOString() }).eq("id", id));
   return res?.ok ? { ...res, message: "Checked out." } : res;
 }
+
+/** End of day: check out everyone still marked inside today. */
+export async function checkOutAll(): Promise<ActionState> {
+  const settings = await getSettings();
+  const out = { n: 0 };
+  const res = await runMutation(async (sb) => {
+    const { start } = dayBoundsUTC(todayISO(settings.timezone), settings.timezone);
+    const { data, error } = await sb
+      .from("attendance")
+      .update({ check_out: new Date().toISOString() })
+      .is("check_out", null)
+      .gte("check_in", start)
+      .select("id");
+    if (error) return { error };
+    out.n = data?.length ?? 0;
+  });
+  return res?.ok ? { ...res, message: out.n ? `${out.n} checked out` : "Nobody was checked in" } : res;
+}

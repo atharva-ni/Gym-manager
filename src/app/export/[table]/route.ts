@@ -4,7 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 
 const EXPORTABLE: Record<string, string> = {
   members: "member_code, full_name, phone, email, gender, date_of_birth, joined_on, status, address, emergency_name, emergency_phone, medical_notes, notes",
-  memberships: "plan_name, start_date, end_date, price, discount, paid, balance, status, notes, members(member_code, full_name)",
+  memberships: "plan_name, kind, start_date, end_date, price, discount, paid, refunded, balance, balance_due_on, status, sessions_total, sessions_used, trainers(full_name), notes, members(member_code, full_name)",
+  refunds: "refund_no, refunded_on, amount, method, reason, members(member_code, full_name)",
+  freezes: "start_date, end_date, days, reason, members(member_code, full_name)",
+  pt_sessions: "session_date, notes, trainers(full_name), members(member_code, full_name)",
   payments: "paid_on, amount, method, category, reference, notes, members(member_code, full_name)",
   expenses: "spent_on, category, amount, method, vendor, description",
   attendance: "check_in, check_out, members(member_code, full_name)",
@@ -12,7 +15,7 @@ const EXPORTABLE: Record<string, string> = {
   leads: "created_at, full_name, phone, email, source, interest, status, follow_up_on, notes",
 };
 
-const SOURCE: Record<string, string> = { memberships: "membership_balances" };
+const SOURCE: Record<string, string> = { memberships: "membership_balances", freezes: "membership_freezes" };
 const PAGE = 1000;
 
 function csvCell(v: unknown): string {

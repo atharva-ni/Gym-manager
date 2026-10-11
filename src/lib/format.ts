@@ -114,3 +114,11 @@ export function age(dob: string | null, todayIso: string) {
 export function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]!.toUpperCase()).join("");
 }
+
+/** Open check-ins count as "inside" for this long (people forget to check out). */
+export const INSIDE_HOURS = 4;
+
+/** Earliest check-in time (ISO) that still counts as inside right now. */
+export function insideSince(dayStartIso: string) {
+  return new Date(Math.max(Date.parse(dayStartIso), Date.now() - INSIDE_HOURS * 3_600_000)).toISOString();
+}

@@ -216,3 +216,49 @@ export function ActionButton({
     </>
   );
 }
+
+/** A read-only modal (history lists etc.) opened from a trigger button. */
+export function ViewDialog({
+  title,
+  trigger,
+  triggerClass = "btn-ghost btn-sm",
+  children,
+  wide,
+}: {
+  title: string;
+  trigger: ReactNode;
+  triggerClass?: string;
+  children: ReactNode;
+  wide?: boolean;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const iconOnly = isIconOnly(trigger);
+  return (
+    <>
+      <button
+        type="button"
+        className={triggerClass}
+        onClick={() => ref.current?.showModal()}
+        aria-label={iconOnly ? title : undefined}
+        title={iconOnly ? title : undefined}
+      >
+        {trigger}
+      </button>
+      <dialog
+        ref={ref}
+        aria-label={title}
+        className={`m-auto w-[calc(100%-2rem)] ${wide ? "max-w-2xl" : "max-w-lg"} rounded-xl border border-line bg-surface p-0 text-ink shadow-2xl`}
+      >
+        <div className="flex max-h-[88vh] flex-col">
+          <header className="flex items-center justify-between border-b border-line px-5 py-3.5">
+            <h2 className="font-semibold">{title}</h2>
+            <button type="button" className="btn-ghost btn-sm" onClick={() => ref.current?.close()} aria-label="Close">
+              <X size={16} />
+            </button>
+          </header>
+          <div className="overflow-y-auto px-5 py-4">{children}</div>
+        </div>
+      </dialog>
+    </>
+  );
+}

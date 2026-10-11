@@ -47,15 +47,29 @@ const dayNo = (iso: string) => Math.round(Date.parse(`${iso.slice(0, 10)}T00:00:
 export const daysInclusive = (from: string, to: string) => dayNo(to) - dayNo(from) + 1;
 
 type Fee = { price: number; discount: number; paid: number; start_date: string; end_date: string };
+type FreezeSpan = { start_date: string; end_date: string };
+
+/** Days of the freezes that fall on or before `until` (inclusive). */
+function frozenDaysUntil(freezes: FreezeSpan[], until: string) {
+  return freezes.reduce((sum, f) => {
+    const end = f.end_date < until ? f.end_date : until;
+    return sum + Math.max(0, daysInclusive(f.start_date, end));
+  }, 0);
+}
 
 /**
  * Changing / upgrading a plan on `changeDate`: the old plan is charged only for
- * the days used, and whatever was paid beyond that becomes credit on the new plan.
+ * the days used, and whatever was paid beyond that becomes credit on the new
+ * plan. Frozen days pushed the end date out, so they count as neither used
+ * nor paid-for days.
  */
-export function planChangeCredit(fee: Fee, changeDate: string) {
+export function planChangeCredit(fee: Fee, changeDate: string, freezes: FreezeSpan[] = []) {
   const net = Number(fee.price) - Number(fee.discount);
-  const total = Math.max(1, daysInclusive(fee.start_date, fee.end_date));
-  const used = Math.min(total, Math.max(0, dayNo(changeDate) - dayNo(fee.start_date)));
+  const frozenTotal = frozenDaysUntil(freezes, fee.end_date);
+  const total = Math.max(1, daysInclusive(fee.start_date, fee.end_date) - frozenTotal);
+  const elapsed = Math.max(0, dayNo(changeDate) - dayNo(fee.start_date));
+  const frozenBefore = elapsed > 0 ? frozenDaysUntil(freezes, addDaysIso(changeDate, -1)) : 0;
+  const used = Math.min(total, Math.max(0, elapsed - frozenBefore));
   const usedValue = r2((net * used) / total);
   const credit = Math.max(0, r2(Number(fee.paid) - usedValue));
   return {
@@ -67,6 +81,8 @@ export function planChangeCredit(fee: Fee, changeDate: string) {
     oldDiscount: r2(Number(fee.price) - usedValue),
   };
 }
+
+const addDaysIso = (iso: string, days: number) => new Date((dayNo(iso) + days) * 86_400_000).toISOString().slice(0, 10);
 
 /** Suggested refund when cancelling on `date`: the paid share of the unused days. */
 export function refundSuggestion(fee: Fee, date: string) {

@@ -405,7 +405,12 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
                           <td className="text-xs">-</td>
                           <td className="num font-medium text-bad">- {money(e.r.amount, currency)}</td>
                           <td>
-                            <div className="flex justify-end">
+                            <div className="flex justify-end gap-1">
+                              {e.r.refund_no && (
+                                <Link href={`/receipt/${e.r.refund_no}`} target="_blank" className="btn-ghost btn-sm" title="Print refund note">
+                                  {e.r.refund_no}
+                                </Link>
+                              )}
                               <ActionButton
                                 action={deleteRecord.bind(null, "refunds", e.r.id)}
                                 confirmLabel="Delete refund"

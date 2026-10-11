@@ -36,15 +36,19 @@ export default async function MembersPage(props: PageProps<"/members">) {
 
   let query = sb.from("member_overview").select("*", { count: "exact" });
   if (q) {
-    const safe = q.replace(/[%,()]/g, " ");
-    query = query.or(`full_name.ilike.%${safe}%,member_code.ilike.%${safe}%,phone.ilike.%${safe}%,email.ilike.%${safe}%`);
+    const safe = q.replace(/[%,()*]/g, " ");
+    const digits = q.replace(/\D/g, "").slice(-10);
+    const filters = [`full_name.ilike.%${safe}%`, `member_code.ilike.%${safe}%`, `email.ilike.%${safe}%`];
+    if (digits.length >= 3) filters.push(`phone_digits.like.%${digits}%`);
+    query = query.or(filters.join(","));
   }
   switch (filter) {
     case "active":
-      query = query.eq("status", "active").gte("membership_end", today);
+      // Same rule as the dashboard: active account, active gym membership (not a day pass), not ended
+      query = query.eq("status", "active").eq("membership_status", "active").eq("membership_kind", "membership").gte("membership_end", today);
       break;
     case "expiring":
-      query = query.eq("status", "active").eq("membership_kind", "membership").gte("membership_end", today).lte("membership_end", soon);
+      query = query.neq("status", "inactive").eq("membership_kind", "membership").gte("membership_end", today).lte("membership_end", soon);
       break;
     case "expired":
       query = query.neq("status", "inactive").eq("membership_kind", "membership").lt("membership_end", today);

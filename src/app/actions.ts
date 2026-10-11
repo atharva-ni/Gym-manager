@@ -12,7 +12,7 @@ import type { PendingFee } from "@/components/collect-fee";
 
 const DELETABLE = new Set([
   "plans", "trainers", "members", "memberships", "payments", "attendance", "measurements",
-  "classes", "expenses", "products", "sales", "equipment", "leads", "refunds",
+  "classes", "expenses", "products", "sales", "equipment", "leads", "refunds", "recurring_expenses",
 ]);
 
 export async function deleteRecord(table: string, id: string): Promise<ActionState> {

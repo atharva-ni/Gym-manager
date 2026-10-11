@@ -2,19 +2,22 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import {
-  ArrowLeft, CalendarPlus, CreditCard, Dumbbell, LogIn, LogOut, MessageCircle, Minus, Pause, Pencil, Play, Plus, Printer, Ruler, Trash2,
+  ArrowLeft, CalendarPlus, CreditCard, Dumbbell, History, LogIn, LogOut, MessageCircle, Minus, Pause, Pencil, Play, Plus, Printer, Ruler,
+  Send, Trash2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings } from "@/lib/auth";
-import { addDays, age, dayBoundsUTC, fmtDate, fmtDateTime, money, monthStart, todayISO } from "@/lib/format";
+import { addDays, age, dayBoundsUTC, fmtDate, fmtDateTime, insideSince, money, monthStart, todayISO } from "@/lib/format";
 import { daysLeftText, isFrozen, membershipState } from "@/lib/member-state";
 import { refundSuggestion } from "@/lib/billing";
 import { label, options, PAYMENT_METHODS } from "@/lib/constants";
 import { getPendingFees } from "@/lib/queries";
 import { waLink } from "@/lib/whatsapp";
-import type { Attendance, Freeze, Measurement, MemberOverview, MembershipBalance, Payment, Plan, Refund } from "@/lib/types";
+import type { Attendance, Freeze, Measurement, MemberOverview, MembershipBalance, Payment, Plan, PtSession, Refund } from "@/lib/types";
+import { siteUrl } from "@/lib/site";
 import { Avatar, Badge, Card, Empty, Stat, StatusBadge, TableWrap, Tabs } from "@/components/ui";
-import { ActionButton, FormDialog } from "@/components/forms";
+import { ActionButton, FormDialog, ViewDialog } from "@/components/forms";
+import { MemberSelect } from "@/components/member-select";
 import { Checkbox, Field, Grid, Hidden, SelectField, TextArea } from "@/components/fields";
 import { TrendLine } from "@/components/charts";
 import { CollectFeeFields } from "@/components/collect-fee";
@@ -24,8 +27,8 @@ import { checkIn, checkOut } from "../../attendance/actions";
 import { collectPayment } from "../../payments/actions";
 import { MemberFields } from "../member-fields";
 import {
-  changePlan, deleteMember, extendMembership, freezeMembership, logSession, refundMembership, renewMembership, saveMeasurement,
-  unfreezeMember, unfreezeMembership, updateMember, updateMembership,
+  changePlan, deleteMember, extendMembership, freezeMembership, logSession, logSessionForm, refundMembership, renewMembership,
+  saveMeasurement, transferMembership, unfreezeMember, unfreezeMembership, updateMember, updateMembership,
 } from "../actions";
 
 const TABS = [
@@ -50,7 +53,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
   const m = memberRow as MemberOverview;
 
   const monthBounds = dayBoundsUTC(monthStart(today), timezone, today);
-  const [msRes, payRes, attRes, measRes, plansRes, trainersRes, visitsRes, fees, frzRes, refRes] = await Promise.all([
+  const [msRes, payRes, attRes, measRes, plansRes, trainersRes, visitsRes, fees, frzRes, refRes, sesRes, site] = await Promise.all([
     sb.from("membership_balances").select("*").eq("member_id", id).order("end_date", { ascending: false }),
     sb.from("payments").select("*").eq("member_id", id).order("paid_on", { ascending: false }).order("created_at", { ascending: false }).limit(100),
     sb.from("attendance").select("*").eq("member_id", id).order("check_in", { ascending: false }).limit(60),
@@ -66,7 +69,10 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
     getPendingFees(sb, id),
     sb.from("membership_freezes").select("*").eq("member_id", id).order("start_date", { ascending: false }),
     sb.from("refunds").select("*").eq("member_id", id).order("refunded_on", { ascending: false }),
+    sb.from("pt_sessions").select("*").eq("member_id", id).order("session_date", { ascending: false }).order("created_at", { ascending: false }),
+    siteUrl(),
   ]);
+  const sessions = (sesRes.data ?? []) as PtSession[];
   const freezes = (frzRes.data ?? []) as Freeze[];
   const refunds = (refRes.data ?? []) as Refund[];
   const freezesOf = (msId: string) => freezes.filter((f) => f.membership_id === msId);
@@ -83,7 +89,12 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
   const trainerName = new Map(allTrainers.map((t) => [t.id, t.full_name]));
 
   const state = membershipState(m, today, settings.expiry_alert_days);
-  const openVisit = attendance.find((a) => !a.check_out && a.check_in >= dayBoundsUTC(today, timezone).start);
+  // An open check-in counts as "inside" for 4 hours (people forget to check out)
+  const since = insideSince(dayBoundsUTC(today, timezone).start);
+  const openVisit = attendance.find((a) => !a.check_out && a.check_in >= since);
+  const isNewMember = !memberships.some((x) => x.kind === "membership");
+  const shareText = (no: string | null, token: string) =>
+    waLink(m.phone, `Hi ${m.full_name}, here is your receipt${no ? ` ${no}` : ""} from ${settings.gym_name}: ${site}/r/${token}`);
   const renewFrom = m.membership_end && m.membership_end >= today ? addDays(m.membership_end, 1) : today;
   const ptFrom = m.pt_end && m.pt_end >= today ? addDays(m.pt_end, 1) : today;
   const totalPaid = payments.reduce((s, p) => s + Number(p.amount), 0) - refunds.reduce((s, r) => s + Number(r.amount), 0);
@@ -199,7 +210,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                 startDate={renewFrom}
                 ptStartDate={ptFrom}
                 defaultTrainerId={m.trainer_id}
-                chargeAdmission={false}
+                chargeAdmission={isNewMember}
               />
             ) : (
               <p className="text-sm text-muted">
@@ -345,8 +356,19 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                 <ul className="divide-y divide-line">
                   {memberships.map((x) => {
                     const isPT = x.kind === "personal_training";
-                    const s =
-                      x.status !== "active" ? x.status : x.end_date < today ? "expired" : x.start_date > today ? "upcoming" : "active";
+                    const isCharge = x.kind === "charge";
+                    const s = isCharge
+                      ? Number(x.balance) > 0
+                        ? "due"
+                        : "paid"
+                      : x.status !== "active"
+                        ? x.status
+                        : x.end_date < today
+                          ? "expired"
+                          : x.start_date > today
+                            ? "upcoming"
+                            : "active";
+                    const ptLog = sessions.filter((ses) => ses.membership_id === x.id);
                     const net = Number(x.price) - Number(x.discount);
                     const owes = Number(x.balance) > 0;
                     const sessionsLeft = x.sessions_total ? x.sessions_total - x.sessions_used : null;
@@ -356,11 +378,12 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                         <div className="min-w-0 space-y-1">
                           <p className="flex flex-wrap items-center gap-2 font-medium text-ink">
                             {isPT && <Badge tone="brand">PT</Badge>}
+                            {x.kind === "pass" && <Badge>Pass</Badge>}
                             {x.plan_name}
                             <StatusBadge status={s} />
                           </p>
                           <p className="text-sm text-ink-2">
-                            {fmtDate(x.start_date)} to {fmtDate(x.end_date)}
+                            {isCharge ? `Charged ${fmtDate(x.start_date)}` : `${fmtDate(x.start_date)} to ${fmtDate(x.end_date)}`}
                             {isPT && <> · {x.trainer_id ? (trainerName.get(x.trainer_id) ?? "Trainer") : "No trainer"}</>}
                           </p>
                           {isPT && (
@@ -375,9 +398,35 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                                 </ActionButton>
                               )}
                               {canLog && (
-                                <ActionButton action={logSession.bind(null, x.id, 1)} className="btn-secondary btn-sm" title="Log a session" successMessage="Session logged">
-                                  <Plus size={12} /> Session
+                                <ActionButton action={logSession.bind(null, x.id, 1)} className="btn-secondary btn-sm" title="Log today's session">
+                                  <Plus size={12} /> Session today
                                 </ActionButton>
+                              )}
+                              {canLog && (
+                                <FormDialog title="Log a PT session" trigger="Other date" triggerClass="btn-ghost btn-sm" action={logSessionForm.bind(null, x.id)} submitLabel="Log session">
+                                  <Grid>
+                                    <Field label="Session date" name="session_date" type="date" min={x.start_date} max={today} defaultValue={today} required />
+                                    <Field label="Notes" name="notes" placeholder="Legs, cardio, assessment" />
+                                  </Grid>
+                                </FormDialog>
+                              )}
+                              {ptLog.length > 0 && (
+                                <ViewDialog title={`Sessions: ${x.plan_name}`} trigger={<><History size={12} /> History</>}>
+                                  <ul className="divide-y divide-line text-sm">
+                                    {ptLog.map((ses, i) => (
+                                      <li key={ses.id} className="flex items-start justify-between gap-3 py-2">
+                                        <span>
+                                          <span className="font-medium text-ink">#{ptLog.length - i}</span> {fmtDate(ses.session_date)}
+                                          {ses.notes && <span className="block text-xs text-muted">{ses.notes}</span>}
+                                        </span>
+                                        <span className="text-xs text-muted">{ses.trainer_id ? trainerName.get(ses.trainer_id) : ""}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                  {x.sessions_used > ptLog.length && (
+                                    <p className="mt-2 text-xs text-muted">{x.sessions_used - ptLog.length} earlier session(s) were counted before dated logging.</p>
+                                  )}
+                                </ViewDialog>
                               )}
                             </div>
                           )}
@@ -425,7 +474,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                             <p className={`text-xs ${x.balance_due_on < today ? "text-bad" : "text-muted"}`}>by {fmtDate(x.balance_due_on)}</p>
                           )}
                           <div className="flex flex-wrap justify-end gap-1">
-                            {s !== "cancelled" && x.end_date >= today && x.kind !== "pass" && !freezesOf(x.id).some((f) => f.end_date >= today) && (
+                            {s !== "cancelled" && x.end_date >= today && x.kind !== "pass" && !isCharge && !freezesOf(x.id).some((f) => f.end_date >= today) && (
                               <FormDialog
                                 title={isPT ? "Freeze PT package" : "Freeze membership"}
                                 trigger={<><Pause size={12} /> Freeze</>}
@@ -437,6 +486,10 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                                 <p className="text-sm text-muted">
                                   The plan is paused for the freeze length and its end date ({fmtDate(x.end_date)}) moves out by the same number of days.
                                   It resumes automatically, or use Resume now to end it early.
+                                  {settings.freeze_max_days
+                                    ? ` Limit: ${settings.freeze_max_days} days per plan (${freezesOf(x.id).reduce((a, f) => a + f.days, 0)} used).`
+                                    : ""}
+                                  {Number(settings.freeze_fee) > 0 ? ` A freeze fee of ${money(settings.freeze_fee, currency)} is added to dues.` : ""}
                                 </p>
                                 <Grid cols={3}>
                                   <Field label="Freeze from" name="start_date" type="date" min={today} max={x.end_date} defaultValue={today} required />
@@ -445,7 +498,8 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                                 </Grid>
                               </FormDialog>
                             )}
-                            {x.kind === "membership" && s === "active" && gymPlans.length > 0 && (
+                            {s === "active" &&
+                              ((x.kind === "membership" && gymPlans.length > 0) || (isPT && ptPlans.length > 0 && trainers.length > 0)) && (
                               <FormDialog
                                 title={`Change plan: ${x.plan_name}`}
                                 trigger="Change plan"
@@ -456,16 +510,37 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                                 wide
                               >
                                 <BillFields
-                                  plans={gymPlans.filter((p) => p.id !== x.plan_id)}
-                                  ptPlans={[]}
-                                  trainers={[]}
+                                  ptOnly={isPT}
+                                  plans={isPT ? [] : gymPlans.filter((p) => p.id !== x.plan_id)}
+                                  ptPlans={isPT ? ptPlans.filter((p) => p.id !== x.plan_id) : []}
+                                  trainers={trainers}
                                   currency={currency}
                                   today={today}
                                   startDate={today > x.start_date ? today : x.start_date}
-                                  ptStartDate={today}
+                                  ptStartDate={today > x.start_date ? today : x.start_date}
+                                  defaultTrainerId={x.trainer_id}
                                   chargeAdmission={false}
-                                  changeFrom={x}
+                                  changeFrom={{ ...x, freezes: freezesOf(x.id) }}
                                 />
+                              </FormDialog>
+                            )}
+                            {(x.kind === "membership" || isPT) && s !== "cancelled" && s !== "expired" && (
+                              <FormDialog
+                                title={`Transfer: ${x.plan_name}`}
+                                trigger="Transfer"
+                                triggerClass="btn-ghost btn-sm"
+                                action={transferMembership.bind(null, x.id)}
+                                submitLabel="Transfer"
+                              >
+                                <p className="text-sm text-muted">
+                                  Moves this {isPT ? "PT package" : "membership"} (with its remaining days, freezes and pending balance) to another member.
+                                  Payments already made stay on {m.full_name}&apos;s history.
+                                </p>
+                                <MemberSelect name="to_member_id" label="Transfer to" required />
+                                <Grid>
+                                  <Field label="Transfer fee" name="fee" type="number" step="0.01" min={0} defaultValue={0} hint="Added to the new member's dues." />
+                                  <Field label="Note" name="note" placeholder="Moving to another city" />
+                                </Grid>
                               </FormDialog>
                             )}
                             {(Number(x.paid) > 0 || s !== "cancelled") && (
@@ -497,8 +572,12 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                                   <Field label="Reason" name="reason" placeholder="Moving city, medical, unhappy" />
                                 </Grid>
                                 {s !== "cancelled" && <Checkbox label="Cancel this plan (stops it and clears any pending balance)" name="cancel" defaultChecked />}
+                                {s !== "cancelled" && (
+                                  <p className="text-xs text-muted">If you don&apos;t cancel, the plan continues and its fee is lowered by the refund amount.</p>
+                                )}
                               </FormDialog>
                             )}
+                            {!isCharge && (
                             <FormDialog
                               title={isPT ? "Extend PT package" : "Extend membership"}
                               trigger="Extend"
@@ -516,6 +595,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                                 <Field label="Reason" name="reason" placeholder="Freeze: travel" />
                               </Grid>
                             </FormDialog>
+                            )}
                             <FormDialog title={isPT ? "Edit PT package" : "Edit membership"} trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={updateMembership}>
                               <Hidden name="id" value={x.id} />
                               <Hidden name="kind" value={x.kind} />
@@ -600,7 +680,15 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                             <td>{label(h.r.method)}</td>
                             <td className="text-xs">-</td>
                             <td className="num font-medium text-bad">- {money(h.r.amount, currency)}</td>
-                            <td />
+                            <td>
+                              {h.r.refund_no && (
+                                <div className="flex justify-end">
+                                  <Link href={`/receipt/${h.r.refund_no}`} className="btn-ghost btn-sm" target="_blank" title="Print refund note">
+                                    <Printer size={14} />
+                                  </Link>
+                                </div>
+                              )}
+                            </td>
                           </tr>
                         ) : (
                         <tr key={h.p.id}>
@@ -614,6 +702,17 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                               <Link href={`/receipt/${h.p.receipt_no ?? h.p.id}`} className="btn-ghost btn-sm" target="_blank" title="Print receipt">
                                 <Printer size={14} />
                               </Link>
+                              {shareText(h.p.receipt_no, h.p.share_token) && (
+                                <a
+                                  href={shareText(h.p.receipt_no, h.p.share_token)!}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="btn-ghost btn-sm text-good"
+                                  title="Send receipt on WhatsApp"
+                                >
+                                  <Send size={14} />
+                                </a>
+                              )}
                               <ActionButton
                                 action={deleteRecord.bind(null, "payments", h.p.id)}
                                 confirmLabel="Delete payment"

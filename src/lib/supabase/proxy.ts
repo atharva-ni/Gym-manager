@@ -1,7 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login"];
+// /r/<token> = receipt links shared with members (read through a token-checked database function)
+const PUBLIC_PATHS = ["/login", "/r/"];
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });

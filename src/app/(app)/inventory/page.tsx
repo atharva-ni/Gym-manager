@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PackagePlus, Pencil, Plus, ShoppingCart, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings } from "@/lib/auth";
-import { fmtDate, money, todayISO } from "@/lib/format";
+import { addDays, fmtDate, money, todayISO } from "@/lib/format";
 import { label, options, PAYMENT_METHODS, PRODUCT_CATEGORIES } from "@/lib/constants";
 import { rangeParams } from "@/lib/queries";
 import type { Product, Sale } from "@/lib/types";
@@ -85,7 +85,13 @@ export default async function InventoryPage(props: PageProps<"/inventory">) {
                     <SelectField label="Method" name="method" defaultValue="cash" options={options(PAYMENT_METHODS)} />
                     <Field label="Date" name="sold_on" type="date" defaultValue={today} required />
                   </Grid>
-                  <MemberSelect label="Member (optional)" />
+                  <MemberSelect label="Member (optional for cash sales)" />
+                  <div className="rounded-lg border border-line p-3">
+                    <Checkbox label="Add to the member's dues (pay later)" name="on_credit" />
+                    <div className="mt-3 sm:w-1/2">
+                      <Field label="Pay by" name="due_on" type="date" min={today} defaultValue={addDays(today, 7)} hint="Only used when added to dues." />
+                    </div>
+                  </div>
                 </>
               ) : (
                 <p className="text-sm text-muted">No products in stock. Add products or restock first.</p>
@@ -200,6 +206,7 @@ export default async function InventoryPage(props: PageProps<"/inventory">) {
                     <tr>
                       <th>Date</th>
                       <th>Product</th>
+                      <th>Receipt</th>
                       <th>Customer</th>
                       <th className="num">Qty</th>
                       <th className="num">Unit price</th>
@@ -212,6 +219,15 @@ export default async function InventoryPage(props: PageProps<"/inventory">) {
                     {sales.map((s) => (
                       <tr key={s.id}>
                         <td className="whitespace-nowrap">{fmtDate(s.sold_on)}</td>
+                        <td className="text-xs">
+                          {s.receipt_no ? (
+                            <Link href={`/receipt/${s.receipt_no}`} target="_blank" className="text-brand hover:underline">
+                              {s.receipt_no}
+                            </Link>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
                         <td className="font-medium text-ink">{s.product_name}</td>
                         <td>
                           {s.member_id && s.members ? (
@@ -222,10 +238,10 @@ export default async function InventoryPage(props: PageProps<"/inventory">) {
                         </td>
                         <td className="num">{s.quantity}</td>
                         <td className="num">{money(s.unit_price, currency)}</td>
-                        <td>{label(s.method)}</td>
+                        <td>{s.on_credit ? <Badge tone="warn">On dues</Badge> : label(s.method)}</td>
                         <td className="num font-medium text-ink">{money(s.total, currency)}</td>
                         <td>
-                          <ActionButton action={deleteRecord.bind(null, "sales", s.id)} confirmLabel="Void sale" confirmText={`Void the sale of ${s.quantity} × ${s.product_name}? Stock will be returned.`} successMessage="Sale voided">
+                          <ActionButton action={deleteRecord.bind(null, "sales", s.id)} confirmLabel="Void sale" confirmText={`Void the sale of ${s.quantity} × ${s.product_name}? Stock will be returned${s.on_credit ? " and the unpaid due removed (not possible once it has been paid)" : ""}.`} successMessage="Sale voided">
                             <Trash2 size={14} />
                           </ActionButton>
                         </td>

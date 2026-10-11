@@ -1,11 +1,11 @@
-import { Pencil, Plus, Trash2, Wrench } from "lucide-react";
+import { History, Pencil, Plus, Trash2, Wrench } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings } from "@/lib/auth";
 import { addDays, fmtDate, money, todayISO } from "@/lib/format";
 import { EQUIPMENT_CATEGORIES, EQUIPMENT_STATUSES, label, options } from "@/lib/constants";
-import type { Equipment } from "@/lib/types";
+import type { Equipment, EquipmentService } from "@/lib/types";
 import { Badge, Card, Empty, PageHeader, Stat, StatusBadge, TableWrap } from "@/components/ui";
-import { ActionButton, FormDialog } from "@/components/forms";
+import { ActionButton, FormDialog, ViewDialog } from "@/components/forms";
 import { Field, Grid, Hidden, SelectField, TextArea } from "@/components/fields";
 import { deleteRecord } from "@/app/actions";
 import { logService, saveEquipment } from "./actions";
@@ -38,7 +38,12 @@ export default async function EquipmentPage() {
   const today = todayISO(settings.timezone);
   const soon = addDays(today, 7);
   const sb = await createClient();
-  const { data } = await sb.from("equipment").select("*").order("status").order("name");
+  const [{ data }, { data: serviceRows }] = await Promise.all([
+    sb.from("equipment").select("*").order("status").order("name"),
+    sb.from("equipment_services").select("*").order("serviced_on", { ascending: false }).limit(2000),
+  ]);
+  const services = (serviceRows ?? []) as EquipmentService[];
+  const servicesOf = (id: string) => services.filter((x) => x.equipment_id === id);
   const items = (data ?? []) as Equipment[];
   const inUse = items.filter((e) => e.status !== "retired");
   const attention = inUse.filter(
@@ -106,6 +111,22 @@ export default async function EquipmentPage() {
                     </td>
                     <td>
                       <div className="flex justify-end gap-1">
+                        {servicesOf(e.id).length > 0 && (
+                          <ViewDialog title={`Service history: ${e.name}`} trigger={<History size={14} />}>
+                            <ul className="divide-y divide-line text-sm">
+                              {servicesOf(e.id).map((x) => (
+                                <li key={x.id} className="flex items-start justify-between gap-3 py-2">
+                                  <span>
+                                    {fmtDate(x.serviced_on)}
+                                    {x.notes && <span className="block text-xs text-muted">{x.notes}</span>}
+                                    {x.next_service && <span className="block text-xs text-muted">Next due {fmtDate(x.next_service)}</span>}
+                                  </span>
+                                  <span className="tabular-nums text-ink">{Number(x.cost) > 0 ? money(x.cost, settings.currency) : "No cost"}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </ViewDialog>
+                        )}
                         <FormDialog title={`Log service: ${e.name}`} trigger={<Wrench size={14} />} triggerClass="btn-ghost btn-sm" action={logService} submitLabel="Log service">
                           <Hidden name="id" value={e.id} />
                           <Grid>

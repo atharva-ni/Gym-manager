@@ -15,8 +15,12 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
       timezone: "text!",
       tax_rate: "number",
       expiry_alert_days: "int!",
+      freeze_max_days: "int",
+      freeze_fee: "number",
     });
     row.tax_rate ??= 0;
+    row.freeze_fee ??= 0;
+    if (row.freeze_max_days !== null && Number(row.freeze_max_days) < 1) row.freeze_max_days = null;
     try {
       new Intl.DateTimeFormat("en-US", { timeZone: row.timezone as string });
     } catch {

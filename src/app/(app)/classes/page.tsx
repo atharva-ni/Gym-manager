@@ -1,14 +1,17 @@
-import { Pencil, Plus, Trash2, Users } from "lucide-react";
+import Link from "next/link";
+import { Check, ChevronLeft, ChevronRight, Pencil, Plus, Trash2, Users, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings } from "@/lib/auth";
-import { fmtClock, todayISO } from "@/lib/format";
+import { addDays, fmtClock, fmtDate, todayISO } from "@/lib/format";
 import { DAYS } from "@/lib/constants";
-import type { GymClass } from "@/lib/types";
-import { Card, PageHeader } from "@/components/ui";
+import type { ClassBooking, GymClass } from "@/lib/types";
+import { Badge, Card, PageHeader } from "@/components/ui";
+import { MemberSelect } from "@/components/member-select";
 import { ActionButton, FormDialog } from "@/components/forms";
 import { Checkbox, Field, Grid, Hidden, SelectField } from "@/components/fields";
 import { deleteRecord } from "@/app/actions";
 import { saveClass } from "./actions";
+import { bookClass, setBookingStatus } from "./booking-actions";
 
 export const metadata = { title: "Classes · SetFit Fitness" };
 
@@ -43,28 +46,59 @@ function ClassFields({ c, trainers, day }: { c?: GymClass; trainers: { id: strin
   );
 }
 
-export default async function ClassesPage() {
+export default async function ClassesPage(props: PageProps<"/classes">) {
+  const { week } = await props.searchParams;
   const settings = await getSettings();
-  const todayDow = new Date(`${todayISO(settings.timezone)}T12:00:00Z`).getUTCDay();
+  const today = todayISO(settings.timezone);
+  const todayDow = new Date(`${today}T12:00:00Z`).getUTCDay();
+  // Week shown (Monday to Sunday) for bookings
+  const anchor = typeof week === "string" && /^\d{4}-\d{2}-\d{2}$/.test(week) ? week : today;
+  const anchorDow = new Date(`${anchor}T12:00:00Z`).getUTCDay();
+  const monday = addDays(anchor, -((anchorDow + 6) % 7));
+  const dateOf = (dow: number) => addDays(monday, (dow + 6) % 7);
   const sb = await createClient();
-  const [{ data }, { data: trainers }] = await Promise.all([
+  const [{ data }, { data: trainers }, { data: bookingRows }] = await Promise.all([
     sb.from("classes").select("*, trainers(full_name)").order("start_time"),
     sb.from("trainers").select("id, full_name").eq("status", "active").order("full_name"),
+    sb
+      .from("class_bookings")
+      .select("*, members(full_name, member_code)")
+      .gte("class_date", monday)
+      .lte("class_date", addDays(monday, 6))
+      .order("created_at"),
   ]);
   const classes = (data ?? []) as GymClass[];
+  const bookings = (bookingRows ?? []) as ClassBooking[];
+  const bookingsOf = (classId: string, date: string) => bookings.filter((b) => b.class_id === classId && b.class_date === date);
   const weeklySpots = classes.filter((c) => c.is_active).reduce((s, c) => s + c.capacity, 0);
 
   return (
     <>
       <PageHeader
         title="Class schedule"
-        description={`${classes.filter((c) => c.is_active).length} weekly classes · ${weeklySpots} spots per week`}
+        description={`${classes.filter((c) => c.is_active).length} weekly classes · ${weeklySpots} spots per week · ${bookings.filter((b) => b.status !== "cancelled").length} booked this week`}
         actions={
           <FormDialog title="New class" trigger={<><Plus size={16} /> New class</>} action={saveClass}>
             <ClassFields trainers={trainers ?? []} />
           </FormDialog>
         }
       />
+      <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+        <Link href={`/classes?week=${addDays(monday, -7)}`} className="btn-secondary btn-sm" aria-label="Previous week">
+          <ChevronLeft size={14} />
+        </Link>
+        <span className="font-medium text-ink">
+          Week of {fmtDate(monday)} to {fmtDate(addDays(monday, 6))}
+        </span>
+        <Link href={`/classes?week=${addDays(monday, 7)}`} className="btn-secondary btn-sm" aria-label="Next week">
+          <ChevronRight size={14} />
+        </Link>
+        {anchor !== today && (
+          <Link href="/classes" className="btn-ghost btn-sm">
+            This week
+          </Link>
+        )}
+      </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-7">
         {WEEK.map((d) => {
           const list = classes.filter((c) => c.day_of_week === d);
@@ -76,7 +110,8 @@ export default async function ClassesPage() {
               title={
                 <span className="flex items-center gap-2">
                   {DAYS[d]}
-                  {d === todayDow && <span className="rounded bg-brand-soft px-1.5 text-[10px] font-semibold uppercase text-brand">Today</span>}
+                  <span className="text-xs font-normal text-muted">{fmtDate(dateOf(d)).replace(/ \d{4}$/, "")}</span>
+                  {dateOf(d) === today && <span className="rounded bg-brand-soft px-1.5 text-[10px] font-semibold uppercase text-brand">Today</span>}
                 </span>
               }
             >
@@ -88,9 +123,52 @@ export default async function ClassesPage() {
                   <p className="font-medium text-ink">{c.name}</p>
                   <p className="text-xs text-muted">{c.trainers?.full_name ?? "No trainer"}{c.room ? ` · ${c.room}` : ""}</p>
                   <div className="mt-1 flex items-center justify-between">
-                    <span className="flex items-center gap-1 text-xs text-muted">
-                      <Users size={12} /> {c.capacity}
-                    </span>
+                    {(() => {
+                      const date = dateOf(d);
+                      const list = bookingsOf(c.id, date);
+                      const active = list.filter((b) => b.status !== "cancelled");
+                      const full = active.length >= c.capacity;
+                      return (
+                        <FormDialog
+                          title={`${c.name} · ${DAYS[d]} ${fmtDate(date)}`}
+                          trigger={<><Users size={12} /> {active.length}/{c.capacity}</>}
+                          triggerClass={`btn-ghost btn-sm px-1.5 ${full ? "text-bad" : "text-muted"}`}
+                          action={bookClass.bind(null, c.id, date)}
+                          submitLabel="Book"
+                        >
+                          {list.length > 0 ? (
+                            <ul className="divide-y divide-line text-sm">
+                              {list.map((b) => (
+                                <li key={b.id} className="flex items-center justify-between gap-2 py-1.5">
+                                  <span className={b.status === "cancelled" ? "text-muted line-through" : "text-ink"}>
+                                    {b.members?.full_name ?? "Member"} <span className="text-xs text-muted">{b.members?.member_code}</span>
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    {b.status === "attended" && <Badge tone="good">Attended</Badge>}
+                                    {b.status === "booked" && (
+                                      <>
+                                        <ActionButton action={setBookingStatus.bind(null, b.id, "attended")} className="btn-ghost btn-sm px-1.5 text-good" title="Mark attended">
+                                          <Check size={14} />
+                                        </ActionButton>
+                                        <ActionButton action={setBookingStatus.bind(null, b.id, "cancelled")} className="btn-ghost btn-sm px-1.5" title="Cancel booking">
+                                          <X size={14} />
+                                        </ActionButton>
+                                      </>
+                                    )}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-sm text-muted">No bookings yet.</p>
+                          )}
+                          <p className="text-xs text-muted">
+                            {active.length} of {c.capacity} spots taken{full ? ". The class is full." : "."}
+                          </p>
+                          {!full && c.is_active && <MemberSelect required label="Book a member" />}
+                        </FormDialog>
+                      );
+                    })()}
                     <span className="flex">
                       <FormDialog title="Edit class" trigger={<Pencil size={12} />} triggerClass="btn-ghost btn-sm px-1.5" action={saveClass}>
                         <ClassFields c={c} trainers={trainers ?? []} />

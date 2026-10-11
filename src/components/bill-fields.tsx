@@ -49,7 +49,16 @@ export function BillFields({
   /** Tick "charge admission fee" by default (new admissions yes, renewals no). */
   chargeAdmission?: boolean;
   /** Plan change: the current plan whose unused, paid days become credit. */
-  changeFrom?: { plan_name: string; price: number; discount: number; paid: number; start_date: string; end_date: string };
+  changeFrom?: {
+    plan_name: string;
+    price: number;
+    discount: number;
+    paid: number;
+    start_date: string;
+    end_date: string;
+    /** Freezes on the current plan; frozen days are neither used nor credited. */
+    freezes?: { start_date: string; end_date: string }[];
+  };
 }) {
   const [planId, setPlanId] = useState(ptOnly ? "" : (plans[0]?.id ?? ""));
   const [admission, setAdmission] = useState(chargeAdmission);
@@ -59,6 +68,7 @@ export function BillFields({
   const [discValue, setDiscValue] = useState("");
   const [paid, setPaid] = useState<string | null>(null); // null = follow the total
   const [start, setStart] = useState(startDate);
+  const [ptStart, setPtStart] = useState(ptStartDate);
 
   const plan = plans.find((p) => p.id === planId);
   const pt = ptOn ? ptPlans.find((p) => p.id === ptPlanId) : undefined;
@@ -71,7 +81,8 @@ export function BillFields({
   const subtotal = r2(lines.reduce((s, l) => s + l.amount, 0));
   const dv = Number(discValue) || 0;
   const userDiscount = Math.max(0, r2(discType === "percent" ? (subtotal * dv) / 100 : dv));
-  const change = changeFrom && plan ? planChangeCredit(changeFrom, start || startDate) : null;
+  const change =
+    changeFrom && (plan || pt) ? planChangeCredit(changeFrom, (plan ? start : ptStart) || startDate, changeFrom.freezes ?? []) : null;
   const credit = change?.credit ?? 0;
   const discount = Math.min(subtotal, r2(userDiscount + credit));
   const total = r2(subtotal - discount);
@@ -144,7 +155,7 @@ export function BillFields({
           {ptOn && (
             <div className={`grid gap-4 sm:grid-cols-3 ${ptOnly ? "" : "mt-3"}`}>
               <label className="block">
-                <span className="label">PT package</span>
+                <span className="label">{changeFrom ? "Change to" : "PT package"}</span>
                 <select name="pt_plan_id" className="input" value={ptPlanId} onChange={(e) => { setPtPlanId(e.target.value); setPaid(null); }} required>
                   {ptPlans.map((p) => (
                     <option key={p.id} value={p.id}>
@@ -164,11 +175,28 @@ export function BillFields({
               </label>
               <label className="block">
                 <span className="label">PT starts</span>
-                <input type="date" name="pt_start_date" className="input" defaultValue={ptStartDate} />
+                <input
+                  type="date"
+                  name="pt_start_date"
+                  className="input"
+                  value={ptStart}
+                  min={changeFrom ? today : undefined}
+                  max={changeFrom?.end_date}
+                  onChange={(e) => {
+                    setPtStart(e.target.value);
+                    setPaid(null);
+                  }}
+                />
               </label>
             </div>
           )}
         </div>
+      )}
+      {ptOnly && change && changeFrom && (
+        <p className="rounded-lg bg-brand-soft px-3 py-2 text-sm text-brand">
+          {changeFrom.plan_name}: {change.usedDays} of {change.totalDays} days used ({money(change.usedValue, currency)}).
+          {credit > 0 ? ` ${money(credit, currency)} paid for unused days is credited to the new package.` : " Nothing extra was paid, so there is no credit."}
+        </p>
       )}
 
       {/* Discount */}

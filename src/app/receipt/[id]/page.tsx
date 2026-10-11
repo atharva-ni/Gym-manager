@@ -1,145 +1,136 @@
 import { notFound } from "next/navigation";
+import { Send } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings } from "@/lib/auth";
-import { fmtDate, money } from "@/lib/format";
+import { fmtDate } from "@/lib/format";
 import { label } from "@/lib/constants";
+import { siteUrl } from "@/lib/site";
+import { waLink } from "@/lib/whatsapp";
 import type { MembershipBalance, Payment } from "@/lib/types";
+import { ReceiptView, type ReceiptData } from "@/components/receipt-view";
 import { PrintButton } from "./print-button";
 
 export const metadata = { title: "Receipt · SetFit Fitness" };
 
-type Fee = Pick<
-  MembershipBalance,
-  "id" | "plan_name" | "kind" | "start_date" | "end_date" | "price" | "discount" | "paid" | "balance" | "balance_due_on"
->;
-
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+type Member = { full_name: string; member_code: string; phone: string | null } | null;
 
-/** A receipt for one bill: all payments sharing a receipt number (or a single payment). */
+/**
+ * Printable receipt for a bill (all payments sharing a receipt number), a
+ * counter sale (S-00001) or a refund note (RF-00001). Opened by number or id.
+ */
 export default async function ReceiptPage(props: PageProps<"/receipt/[id]">) {
-  const { id } = await props.params;
+  const { id: raw } = await props.params;
+  const id = decodeURIComponent(raw);
   const settings = await getSettings();
-  const { currency } = settings;
   const sb = await createClient();
+  const gym = settings;
+  let data: ReceiptData;
+  let share: { phone: string | null | undefined; token: string; no: string } | null = null;
 
-  const select = "*, members(full_name, member_code, phone)";
-  const { data: first } = UUID.test(id)
-    ? await sb.from("payments").select(select).eq("id", id).maybeSingle()
-    : await sb.from("payments").select(select).eq("receipt_no", decodeURIComponent(id)).limit(1).maybeSingle();
-  if (!first) notFound();
+  if (id.startsWith("S-")) {
+    const { data: sale } = await sb.from("sales").select("*, members(full_name, member_code, phone)").eq("receipt_no", id).maybeSingle();
+    if (!sale) notFound();
+    const member = sale.members as Member;
+    data = {
+      title: "Sale receipt",
+      number: sale.receipt_no,
+      date: sale.sold_on,
+      gym,
+      member,
+      mode: sale.on_credit ? "Added to dues" : label(sale.method),
+      items: [{ label: `${sale.product_name} x ${sale.quantity}`, amount: Number(sale.total) }],
+      totalLabel: sale.on_credit ? "Amount added to dues" : "Amount received",
+      total: Number(sale.total),
+    };
+    share = { phone: member?.phone, token: sale.share_token, no: sale.receipt_no };
+  } else if (id.startsWith("RF-")) {
+    const { data: ref } = await sb
+      .from("refunds")
+      .select("*, members(full_name, member_code, phone), memberships(plan_name, start_date, end_date)")
+      .eq("refund_no", id)
+      .maybeSingle();
+    if (!ref) notFound();
+    const plan = ref.memberships as { plan_name: string; start_date: string; end_date: string } | null;
+    data = {
+      title: "Refund note",
+      number: ref.refund_no,
+      date: ref.refunded_on,
+      gym: { ...gym, tax_rate: 0 },
+      member: ref.members as Member,
+      mode: label(ref.method),
+      items: [
+        {
+          label: plan ? `Refund on ${plan.plan_name}` : "Refund",
+          sub: plan ? `${fmtDate(plan.start_date)} to ${fmtDate(plan.end_date)}` : null,
+          amount: Number(ref.amount),
+        },
+      ],
+      totalLabel: "Amount refunded",
+      total: Number(ref.amount),
+      notes: ref.reason,
+    };
+  } else {
+    const select = "*, members(full_name, member_code, phone)";
+    const { data: first } = UUID.test(id)
+      ? await sb.from("payments").select(select).eq("id", id).maybeSingle()
+      : await sb.from("payments").select(select).eq("receipt_no", id).limit(1).maybeSingle();
+    if (!first) notFound();
+    const { data: group } = first.receipt_no
+      ? await sb.from("payments").select("*").eq("receipt_no", first.receipt_no).order("created_at")
+      : { data: [first] };
+    const payments = (group ?? [first]) as Payment[];
+    const feeIds = payments.map((p) => p.membership_id).filter(Boolean) as string[];
+    const { data: feeRows } = feeIds.length ? await sb.from("membership_balances").select("*").in("id", feeIds) : { data: [] };
+    const fees = new Map(((feeRows ?? []) as MembershipBalance[]).map((f) => [f.id, f]));
+    const owed = [...fees.values()].filter((f) => f.status !== "cancelled");
+    const member = first.members as Member;
+    data = {
+      title: "Payment receipt",
+      number: first.receipt_no ?? first.id.slice(0, 8).toUpperCase(),
+      date: first.paid_on,
+      gym,
+      member,
+      mode: [...new Set(payments.map((p) => label(p.method)))].join(" + ") + (first.reference ? ` · Ref ${first.reference}` : ""),
+      items: payments.map((p) => {
+        const fee = p.membership_id ? fees.get(p.membership_id) : undefined;
+        return {
+          label: fee ? `${fee.kind === "personal_training" ? "Personal training: " : ""}${fee.plan_name}` : label(p.category),
+          sub:
+            fee && fee.kind !== "charge"
+              ? `${fmtDate(fee.start_date)} to ${fmtDate(fee.end_date)}${payments.length > 1 ? ` · ${label(p.method)}` : ""}`
+              : null,
+          fee: fee ? Number(fee.price) - Number(fee.discount) : null,
+          amount: Number(p.amount),
+        };
+      }),
+      totalLabel: "Amount received",
+      total: payments.reduce((s, p) => s + Number(p.amount), 0),
+      balance: fees.size ? owed.reduce((s, f) => s + Number(f.balance), 0) : null,
+      balanceDueOn: owed.map((f) => f.balance_due_on).filter(Boolean).sort()[0] ?? null,
+      notes: first.notes,
+    };
+    share = { phone: member?.phone, token: first.share_token, no: data.number };
+  }
 
-  const { data: group } = first.receipt_no
-    ? await sb.from("payments").select("*").eq("receipt_no", first.receipt_no).order("created_at")
-    : { data: [first] };
-  const payments = (group ?? [first]) as Payment[];
-  const total = payments.reduce((s, p) => s + Number(p.amount), 0);
-
-  const feeIds = payments.map((p) => p.membership_id).filter(Boolean) as string[];
-  const { data: feeRows } = feeIds.length
-    ? await sb
-        .from("membership_balances")
-        .select("id, plan_name, kind, start_date, end_date, price, discount, paid, balance, balance_due_on")
-        .in("id", feeIds)
-    : { data: [] };
-  const fees = new Map(((feeRows ?? []) as Fee[]).map((f) => [f.id, f]));
-  const anyBalance = [...fees.values()].reduce((s, f) => s + Number(f.balance), 0);
-  const nextDue = [...fees.values()].map((f) => f.balance_due_on).filter(Boolean).sort()[0];
-
-  const header: [string, string][] = [
-    ["Receipt no.", first.receipt_no ?? first.id.slice(0, 8).toUpperCase()],
-    ["Date", fmtDate(first.paid_on)],
-    ["Received from", first.members ? `${first.members.full_name} (${first.members.member_code})` : "Member"],
-    ...(first.members?.phone ? ([["Phone", first.members.phone]] as [string, string][]) : []),
-    ["Payment mode", `${label(first.method)}${first.reference ? ` · Ref ${first.reference}` : ""}`],
-  ];
+  const site = await siteUrl();
+  const wa = share
+    ? waLink(share.phone, `Hi ${data.member?.full_name ?? ""}, here is your receipt ${share.no} from ${gym.gym_name}: ${site}/r/${share.token}`)
+    : null;
 
   return (
-    <main className="min-h-screen bg-bg px-4 py-10 print:bg-white print:p-0">
-      <div className="mx-auto max-w-md rounded-xl border border-line bg-surface p-8 print:border-0 print:text-black">
-        <div className="border-b border-line pb-4 text-center">
-          <h1 className="text-xl font-semibold">{settings.gym_name}</h1>
-          {settings.address && <p className="text-sm text-muted">{settings.address}</p>}
-          <p className="text-sm text-muted">{[settings.phone, settings.email].filter(Boolean).join(" · ")}</p>
-        </div>
-        <h2 className="mt-5 text-center text-sm font-semibold uppercase tracking-widest text-muted">Payment receipt</h2>
-
-        <dl className="mt-5 space-y-2 text-sm">
-          {header.map(([k, v]) => (
-            <div key={k} className="flex justify-between gap-4">
-              <dt className="text-muted">{k}</dt>
-              <dd className="text-right">{v}</dd>
-            </div>
-          ))}
-        </dl>
-
-        <table className="mt-5 w-full text-sm">
-          <thead>
-            <tr className="border-y border-line text-left text-xs uppercase tracking-wide text-muted">
-              <th className="py-2 font-medium">Item</th>
-              <th className="py-2 text-right font-medium">Fee</th>
-              <th className="py-2 text-right font-medium">Paid now</th>
-            </tr>
-          </thead>
-          <tbody>
-            {payments.map((p) => {
-              const fee = p.membership_id ? fees.get(p.membership_id) : undefined;
-              return (
-                <tr key={p.id} className="border-b border-line align-top">
-                  <td className="py-2 pr-2">
-                    {fee ? (
-                      <>
-                        {fee.kind === "personal_training" ? "Personal training: " : ""}
-                        {fee.plan_name}
-                        <span className="block text-xs text-muted">
-                          {fmtDate(fee.start_date)} to {fmtDate(fee.end_date)}
-                        </span>
-                      </>
-                    ) : (
-                      label(p.category)
-                    )}
-                  </td>
-                  <td className="py-2 text-right tabular-nums">
-                    {fee ? (
-                      <>
-                        {money(Number(fee.price) - Number(fee.discount), currency)}
-                        {Number(fee.discount) > 0 && (
-                          <span className="block text-xs text-muted">after {money(fee.discount, currency)} off</span>
-                        )}
-                      </>
-                    ) : (
-                      "-"
-                    )}
-                  </td>
-                  <td className="py-2 text-right tabular-nums">{money(p.amount, currency)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        <div className="mt-4 flex items-center justify-between">
-          <span className="font-medium">Amount received</span>
-          <span className="text-2xl font-semibold tabular-nums">{money(total, currency)}</span>
-        </div>
-        {Number(settings.tax_rate) > 0 && (
-          <p className="mt-1 text-right text-xs text-muted">
-            Includes GST @ {Number(settings.tax_rate)}%: {money(total - total / (1 + Number(settings.tax_rate) / 100), currency)}
-          </p>
-        )}
-        {fees.size > 0 && (
-          <div className="mt-3 flex justify-between rounded-lg bg-surface-2 p-3 text-sm font-semibold print:bg-transparent print:p-0">
-            <span>Balance due</span>
-            <span className="tabular-nums">
-              {anyBalance > 0 ? `${money(anyBalance, currency)}${nextDue ? ` by ${fmtDate(nextDue)}` : ""}` : "Nil (fully paid)"}
-            </span>
-          </div>
-        )}
-        {first.notes && <p className="mt-4 text-sm text-muted">{first.notes}</p>}
-        <p className="mt-8 text-center text-xs text-muted">This is a computer-generated receipt. Thank you for training with us!</p>
-      </div>
-      <div className="mt-6 text-center print:hidden">
-        <PrintButton />
-      </div>
-    </main>
+    <ReceiptView
+      r={data}
+      actions={
+        <>
+          <PrintButton />
+          {wa && (
+            <a href={wa} target="_blank" rel="noreferrer" className="btn-secondary text-good">
+              <Send size={16} /> Send on WhatsApp
+            </a>
+          )}
+        </>
+      }
+    />
   );
 }

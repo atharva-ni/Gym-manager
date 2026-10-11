@@ -27,7 +27,14 @@ export async function saveTrainer(_: ActionState, fd: FormData): Promise<ActionS
 /** Record a salary payout as an expense. */
 export async function paySalary(_: ActionState, fd: FormData): Promise<ActionState> {
   return runMutation((sb) => {
-    const row = parseForm(fd, { amount: "number!", spent_on: "date!", method: "text!", vendor: "text!", description: "text" });
+    const row = parseForm(fd, {
+      trainer_id: "uuid!",
+      amount: "number!",
+      spent_on: "date!",
+      method: "text!",
+      vendor: "text!",
+      description: "text",
+    });
     return sb.from("expenses").insert({ ...row, category: "salary" });
   });
 }

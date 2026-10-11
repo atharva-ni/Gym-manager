@@ -1,11 +1,11 @@
-import { Banknote, Pencil, Plus, Trash2 } from "lucide-react";
+import { Banknote, History, Pencil, Plus, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings } from "@/lib/auth";
 import { fmtDate, money, monthLabel, monthStart, todayISO } from "@/lib/format";
 import { options, PAYMENT_METHODS } from "@/lib/constants";
 import type { Trainer } from "@/lib/types";
 import { Avatar, Card, Empty, PageHeader, Stat, StatusBadge, TableWrap } from "@/components/ui";
-import { ActionButton, FormDialog } from "@/components/forms";
+import { ActionButton, FormDialog, ViewDialog } from "@/components/forms";
 import { Field, Grid, Hidden, SelectField, TextArea } from "@/components/fields";
 import { deleteRecord } from "@/app/actions";
 import { paySalary, saveTrainer } from "./actions";
@@ -50,16 +50,28 @@ export default async function TrainersPage() {
   const settings = await getSettings();
   const today = todayISO(settings.timezone);
   const sb = await createClient();
-  const [{ data }, { data: assigned }, { data: classes }, { data: ptRows }] = await Promise.all([
+  const [{ data }, { data: assigned }, { data: classes }, { data: ptRows }, { data: payoutRows }] = await Promise.all([
     sb.from("trainers").select("*").order("status").order("full_name"),
     sb.from("members").select("trainer_id").eq("status", "active").not("trainer_id", "is", null),
     sb.from("classes").select("trainer_id").eq("is_active", true).not("trainer_id", "is", null),
     sb.rpc("trainer_pt_stats", { p_from: monthStart(today), p_to: today, p_today: today }),
+    sb
+      .from("expenses")
+      .select("id, trainer_id, amount, spent_on, description, method")
+      .eq("category", "salary")
+      .not("trainer_id", "is", null)
+      .order("spent_on", { ascending: false })
+      .limit(1000),
   ]);
+  type Payout = { id: string; trainer_id: string; amount: number; spent_on: string; description: string | null; method: string };
+  const payouts = (payoutRows ?? []) as Payout[];
+  const payoutsOf = (id: string) => payouts.filter((p) => p.trainer_id === id);
+  const paidThisMonth = (id: string) =>
+    payoutsOf(id).filter((p) => p.spent_on >= monthStart(today)).reduce((sum, p) => sum + Number(p.amount), 0);
   const pt = new Map(
-    ((ptRows ?? []) as { trainer_id: string; clients: number; revenue: number }[]).map((r) => [
+    ((ptRows ?? []) as { trainer_id: string; clients: number; revenue: number; sessions: number }[]).map((r) => [
       r.trainer_id,
-      { clients: Number(r.clients), revenue: Number(r.revenue) },
+      { clients: Number(r.clients), revenue: Number(r.revenue), sessions: Number(r.sessions ?? 0) },
     ]),
   );
   const commissionOf = (t: Trainer) => Math.round(((pt.get(t.id)?.revenue ?? 0) * Number(t.pt_commission_pct ?? 0)) / 100);
@@ -106,6 +118,7 @@ export default async function TrainersPage() {
                   <th>Contact</th>
                   <th className="num">Members</th>
                   <th className="num">PT clients</th>
+                  <th className="num">Sessions (month)</th>
                   <th className="num">PT fees (month)</th>
                   <th className="num">Salary + commission</th>
                   <th>Status</th>
@@ -137,6 +150,7 @@ export default async function TrainersPage() {
                       {classCount.get(t.id) ? <span className="block text-xs text-muted">{classCount.get(t.id)} classes</span> : null}
                     </td>
                     <td className="num">{pt.get(t.id)?.clients ?? 0}</td>
+                    <td className="num">{pt.get(t.id)?.sessions ?? 0}</td>
                     <td className="num">{money(pt.get(t.id)?.revenue ?? 0, settings.currency)}</td>
                     <td className="num">
                       {money(t.salary, settings.currency)}
@@ -159,6 +173,12 @@ export default async function TrainersPage() {
                           submitLabel="Record payout"
                         >
                           <Hidden name="vendor" value={t.full_name} />
+                          <Hidden name="trainer_id" value={t.id} />
+                          {paidThisMonth(t.id) > 0 && (
+                            <p className="rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn">
+                              Already paid {money(paidThisMonth(t.id), settings.currency)} to {t.full_name} this month.
+                            </p>
+                          )}
                           <p className="text-sm text-muted">
                             Recorded as a salary expense.
                             {commissionOf(t) > 0 && ` Includes ${money(commissionOf(t), settings.currency)} PT commission for this month.`}
@@ -174,6 +194,21 @@ export default async function TrainersPage() {
                             />
                           </Grid>
                         </FormDialog>
+                        {payoutsOf(t.id).length > 0 && (
+                          <ViewDialog title={`Salary history: ${t.full_name}`} trigger={<History size={14} />}>
+                            <ul className="divide-y divide-line text-sm">
+                              {payoutsOf(t.id).map((p) => (
+                                <li key={p.id} className="flex items-center justify-between gap-3 py-2">
+                                  <span>
+                                    {fmtDate(p.spent_on)}
+                                    {p.description && <span className="block text-xs text-muted">{p.description}</span>}
+                                  </span>
+                                  <span className="tabular-nums font-medium text-ink">{money(p.amount, settings.currency)}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </ViewDialog>
+                        )}
                         <FormDialog title="Edit staff member" trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={saveTrainer} wide>
                           <TrainerFields t={t} today={today} />
                         </FormDialog>

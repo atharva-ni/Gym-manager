@@ -43,6 +43,7 @@ export default async function ReportsPage(props: PageProps<"/reports">) {
       .from("member_overview")
       .select("id", { count: "exact", head: true })
       .neq("status", "inactive")
+      .eq("membership_kind", "membership")
       .gte("membership_end", from)
       .lte("membership_end", to < today ? to : addDays(today, -1)),
   ]);

@@ -19,6 +19,8 @@ export type Settings = {
   timezone: string;
   tax_rate: number;
   expiry_alert_days: number;
+  freeze_max_days: number | null;
+  freeze_fee: number;
 };
 
 export type PlanKind = "membership" | "personal_training" | "pass";
@@ -91,7 +93,8 @@ export type MembershipBalance = {
   member_id: string;
   plan_id: string | null;
   plan_name: string;
-  kind: PlanKind;
+  /** "charge" = one-off due: counter sale on credit, freeze or transfer fee. */
+  kind: PlanKind | "charge";
   trainer_id: string | null;
   sessions_total: number | null;
   sessions_used: number;
@@ -116,6 +119,7 @@ export type Refund = {
   method: string;
   refunded_on: string;
   reason: string | null;
+  refund_no: string | null;
   members?: { full_name: string; member_code: string } | null;
 };
 
@@ -137,6 +141,7 @@ export type Payment = {
   category: string;
   paid_on: string;
   receipt_no: string | null;
+  share_token: string;
   reference: string | null;
   notes: string | null;
   members?: { full_name: string; member_code: string } | null;
@@ -184,6 +189,47 @@ export type Expense = {
   vendor: string | null;
   description: string | null;
   method: string;
+  trainer_id: string | null;
+  bill_path: string | null;
+};
+
+export type RecurringExpense = {
+  id: string;
+  category: string;
+  amount: number;
+  vendor: string | null;
+  description: string | null;
+  method: string;
+  day_of_month: number;
+  trainer_id: string | null;
+  is_active: boolean;
+  last_posted: string | null;
+};
+
+export type PtSession = {
+  id: string;
+  membership_id: string;
+  trainer_id: string | null;
+  session_date: string;
+  notes: string | null;
+};
+
+export type EquipmentService = {
+  id: string;
+  equipment_id: string;
+  serviced_on: string;
+  cost: number;
+  next_service: string | null;
+  notes: string | null;
+};
+
+export type ClassBooking = {
+  id: string;
+  class_id: string;
+  member_id: string;
+  class_date: string;
+  status: "booked" | "attended" | "cancelled" | "no_show";
+  members?: { full_name: string; member_code: string } | null;
 };
 
 export type Product = {
@@ -209,7 +255,10 @@ export type Sale = {
   total: number;
   method: string;
   sold_on: string;
-  members?: { full_name: string } | null;
+  receipt_no: string | null;
+  on_credit: boolean;
+  share_token: string;
+  members?: { full_name: string; phone?: string | null } | null;
 };
 
 export type Equipment = {

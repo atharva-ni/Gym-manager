@@ -36,6 +36,8 @@ const DEFAULT_SETTINGS: Omit<Settings, "owner_id"> = {
   timezone: "Asia/Kolkata",
   tax_rate: 0,
   expiry_alert_days: 7,
+  freeze_max_days: null,
+  freeze_fee: 0,
 };
 
 export const getSettings = cache(async (): Promise<Settings> => {

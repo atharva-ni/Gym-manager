@@ -92,7 +92,7 @@ export async function collectPayment(_: ActionState, fd: FormData): Promise<Acti
             membership_id: ms.id,
             amount: p.amount,
             method: p.method,
-            category: ms.kind === "personal_training" ? "personal_training" : "membership",
+            category: ms.kind === "personal_training" ? "personal_training" : ms.kind === "charge" ? "other" : "membership",
           }))
         : [];
     const rpc = await sb.rpc("collect_fee", {

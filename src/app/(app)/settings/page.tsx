@@ -12,6 +12,9 @@ const EXPORTS = [
   { table: "members", label: "Members" },
   { table: "memberships", label: "Memberships" },
   { table: "payments", label: "Payments" },
+  { table: "refunds", label: "Refunds" },
+  { table: "freezes", label: "Freezes" },
+  { table: "pt_sessions", label: "PT sessions" },
   { table: "expenses", label: "Expenses" },
   { table: "attendance", label: "Attendance" },
   { table: "sales", label: "POS sales" },
@@ -48,6 +51,29 @@ export default async function SettingsPage() {
               <Field label="GST rate %" name="tax_rate" type="number" step="0.01" min={0} max={28} defaultValue={s.tax_rate} hint="Fees are treated as GST-inclusive; receipts show the GST part. Use 0 if not registered." />
             </Grid>
             <TextArea label="Address" name="address" rows={2} defaultValue={s.address} />
+            <div className="rounded-lg border border-line p-3">
+              <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted">Freeze rules</p>
+              <Grid>
+                <Field
+                  label="Max freeze days per plan"
+                  name="freeze_max_days"
+                  type="number"
+                  min={1}
+                  defaultValue={s.freeze_max_days ?? ""}
+                  placeholder="No limit"
+                  hint="Total across all freezes on one membership. Leave empty for no limit."
+                />
+                <Field
+                  label="Freeze fee"
+                  name="freeze_fee"
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  defaultValue={s.freeze_fee ?? 0}
+                  hint="Added to the member's dues each time a plan is frozen. 0 = free."
+                />
+              </Grid>
+            </div>
             <p className="text-xs text-muted">Name, address and contact details appear on printed receipts.</p>
             <div className="flex justify-end">
               <SubmitButton>Save settings</SubmitButton>

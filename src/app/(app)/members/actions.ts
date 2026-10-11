@@ -309,7 +309,8 @@ export async function changePlan(membershipId: string, _: ActionState, fd: FormD
     }
     const start = bill.items[0].start;
     if (start > old.end_date) throw new FormError("The new plan starts after the current one ends. Use Renew instead.");
-    const cr = planChangeCredit(old, start);
+    const { data: freezes } = await sb.from("membership_freezes").select("start_date, end_date").eq("membership_id", old.id);
+    const cr = planChangeCredit(old, start, freezes ?? []);
     bill.credit = cr.credit > 0 ? { amount: cr.credit, note: `Credit ${money(cr.credit, c.currency)} from ${old.plan_name}` } : undefined;
     bill.close = {
       id: old.id,
@@ -338,6 +339,7 @@ export async function changePlan(membershipId: string, _: ActionState, fd: FormD
 /** Pause a membership: the end date moves out by the freeze length. */
 export async function freezeMembership(_: ActionState, fd: FormData): Promise<ActionState> {
   const c = await ctx();
+  const settings = await getSettings();
   const res = await runMutation(async (sb) => {
     const f = parseForm(fd, { id: "uuid!", start_date: "date!", days: "int!", reason: "text" });
     const days = Number(f.days);
@@ -348,9 +350,16 @@ export async function freezeMembership(_: ActionState, fd: FormData): Promise<Ac
       p_start: f.start_date,
       p_days: days,
       p_reason: f.reason,
+      p_max_days: settings.freeze_max_days,
+      p_fee: Number(settings.freeze_fee ?? 0),
     });
   });
-  return res?.ok ? { ...res, message: "Membership frozen. End date moved out." } : res;
+  return res?.ok
+    ? {
+        ...res,
+        message: `Membership frozen. End date moved out.${Number(settings.freeze_fee) > 0 ? ` Freeze fee ${money(settings.freeze_fee, settings.currency)} added to dues.` : ""}`,
+      }
+    : res;
 }
 
 /** End (or cancel) a freeze; unused freeze days come back off the end date. */
@@ -364,6 +373,25 @@ export async function unfreezeMembership(freezeId: string): Promise<ActionState>
 export async function unfreezeMember(memberId: string): Promise<ActionState> {
   const res = await runMutation((sb) => sb.rpc("clear_frozen_status", { p_member_id: memberId }));
   return res?.ok ? { ...res, message: "Membership unfrozen." } : res;
+}
+
+/** Move a membership / PT package to another member (optional transfer fee as a due). */
+export async function transferMembership(membershipId: string, _: ActionState, fd: FormData): Promise<ActionState> {
+  const c = await ctx();
+  const out = { to: "" };
+  const res = await runMutation(async (sb) => {
+    const f = parseForm(fd, { to_member_id: "uuid!", fee: "number", note: "text" });
+    if (Number(f.fee ?? 0) < 0) throw new FormError("Transfer fee can't be negative");
+    out.to = f.to_member_id as string;
+    return sb.rpc("transfer_membership", {
+      p_membership_id: membershipId,
+      p_to_member: f.to_member_id,
+      p_fee: Number(f.fee ?? 0),
+      p_note: f.note,
+      p_date: c.today,
+    });
+  });
+  return res?.ok ? { ...res, message: "Membership transferred", href: `/members/${out.to}` } : res;
 }
 
 /** Refund money on a plan, optionally cancelling it, in one transaction. */
@@ -437,20 +465,26 @@ export async function extendMembership(_: ActionState, fd: FormData): Promise<Ac
   });
 }
 
-/** Mark one PT session as done (or undo the last one with delta = -1). */
+/** Log one PT session today (date + trainer), or undo the last one with delta = -1. */
 export async function logSession(membershipId: string, delta: 1 | -1): Promise<ActionState> {
-  return runMutation(async (sb) => {
-    const { data, error } = await sb
-      .from("memberships")
-      .select("sessions_used, sessions_total")
-      .eq("id", membershipId)
-      .single();
-    if (error) return { error };
-    const next = data.sessions_used + delta;
-    if (next < 0) throw new FormError("No sessions to undo");
-    if (data.sessions_total && next > data.sessions_total) throw new FormError("All sessions in this package are used");
-    return sb.from("memberships").update({ sessions_used: next }).eq("id", membershipId);
+  const c = await ctx();
+  const res = await runMutation((sb) =>
+    delta === 1
+      ? sb.rpc("log_pt_session", { p_membership_id: membershipId, p_date: c.today, p_notes: null })
+      : sb.rpc("undo_pt_session", { p_membership_id: membershipId }),
+  );
+  return res?.ok ? { ...res, message: delta === 1 ? "Session logged" : "Last session removed" } : res;
+}
+
+/** Log a PT session with a chosen date and notes. */
+export async function logSessionForm(membershipId: string, _: ActionState, fd: FormData): Promise<ActionState> {
+  const c = await ctx();
+  const res = await runMutation(async (sb) => {
+    const f = parseForm(fd, { session_date: "date!", notes: "text" });
+    if ((f.session_date as string) > c.today) throw new FormError("Session date can't be in the future");
+    return sb.rpc("log_pt_session", { p_membership_id: membershipId, p_date: f.session_date, p_notes: f.notes });
   });
+  return res?.ok ? { ...res, message: "Session logged" } : res;
 }
 
 export async function saveMeasurement(memberId: string, _: ActionState, fd: FormData): Promise<ActionState> {
@@ -506,6 +540,18 @@ export async function sellDayPass(_: ActionState, fd: FormData): Promise<ActionS
       if (ins.error) return ins;
       memberId = ins.data.id as string;
       out.name = ins.data.full_name;
+      // New visitor: add a trial lead so someone follows up to convert them
+      const lead = await sb.from("leads").insert({
+        full_name: ins.data.full_name,
+        phone: f.phone,
+        source: "walk_in",
+        interest: plan.name,
+        status: "trial",
+        follow_up_on: addDays(c.today, Math.max(1, plan.duration_days)),
+        notes: `Bought a ${plan.name} on ${c.today}`,
+        converted_member_id: memberId,
+      });
+      if (lead.error) return lead;
     }
     const paid = r2(Number(f.amount_paid ?? plan.price));
     const saved = await saveBill(

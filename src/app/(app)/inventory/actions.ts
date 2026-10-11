@@ -46,8 +46,13 @@ export async function restockProduct(_: ActionState, fd: FormData): Promise<Acti
   });
 }
 
+/**
+ * Counter sale with its own receipt number (S-00001). "Add to dues" puts the
+ * amount on the member's pending fees instead of taking payment now.
+ */
 export async function recordSale(_: ActionState, fd: FormData): Promise<ActionState> {
-  return runMutation(async (sb) => {
+  const out = { no: "" };
+  const res = await runMutation(async (sb) => {
     const f = parseForm(fd, {
       product_id: "uuid!",
       quantity: "int!",
@@ -55,20 +60,25 @@ export async function recordSale(_: ActionState, fd: FormData): Promise<ActionSt
       member_id: "uuid",
       method: "text!",
       sold_on: "date!",
+      on_credit: "bool",
+      due_on: "date",
     });
     if (Number(f.quantity) <= 0) throw new FormError("Quantity must be at least 1");
-    const { data: p, error } = await sb.from("products").select("name, price, cost, stock").eq("id", f.product_id as string).single();
+    if (f.on_credit && !f.member_id) throw new FormError("Pick the member to add this sale to their dues");
+    const { data: p, error } = await sb.from("products").select("price").eq("id", f.product_id as string).single();
     if (error) return { error };
-    if (p.stock < Number(f.quantity)) throw new FormError(`Only ${p.stock} of ${p.name} in stock`);
-    return sb.from("sales").insert({
-      product_id: f.product_id,
-      product_name: p.name,
-      member_id: f.member_id,
-      quantity: f.quantity,
-      unit_price: f.unit_price ?? p.price,
-      unit_cost: p.cost,
-      method: f.method,
-      sold_on: f.sold_on,
+    const { data, error: saleErr } = await sb.rpc("pos_sale", {
+      p_product_id: f.product_id,
+      p_quantity: f.quantity,
+      p_unit_price: f.unit_price ?? p.price,
+      p_member_id: f.member_id,
+      p_method: f.method,
+      p_sold_on: f.sold_on,
+      p_on_credit: !!f.on_credit,
+      p_due_on: f.due_on,
     });
+    if (saleErr) return { error: saleErr };
+    out.no = data as string;
   });
+  return res?.ok ? { ...res, message: `Sale saved. Receipt ${out.no}.` } : res;
 }

@@ -12,7 +12,7 @@ export type PendingFee = {
   id: string;
   member_id: string;
   plan_name: string;
-  kind: "membership" | "personal_training" | "pass";
+  kind: "membership" | "personal_training" | "pass" | "charge";
   start_date: string;
   end_date: string;
   balance: number;
@@ -103,8 +103,9 @@ export function CollectFeeFields({
             <select className="input" name="membership_id" value={feeId === OTHER ? "" : feeId} onChange={(e) => pickFee(e.target.value || OTHER)}>
               {fees.map((f) => (
                 <option key={f.id} value={f.id}>
-                  {f.kind === "personal_training" ? "PT: " : ""}
-                  {f.plan_name} ({fmtDate(f.start_date)} to {fmtDate(f.end_date)}) · due {money(f.balance, currency)}
+                  {f.kind === "personal_training" ? "PT: " : f.kind === "charge" ? "Due: " : ""}
+                  {f.plan_name}
+                  {f.kind === "charge" ? ` (${fmtDate(f.start_date)})` : ` (${fmtDate(f.start_date)} to ${fmtDate(f.end_date)})`} · due {money(f.balance, currency)}
                 </option>
               ))}
               <option value="">Other payment (admission, single PT session, misc.)</option>

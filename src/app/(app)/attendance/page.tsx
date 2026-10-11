@@ -3,7 +3,7 @@ import Form from "next/form";
 import { ChevronLeft, ChevronRight, LogIn, LogOut, Ticket, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings } from "@/lib/auth";
-import { addDays, dayBoundsUTC, fmtDate, fmtTime, todayISO } from "@/lib/format";
+import { addDays, dayBoundsUTC, fmtDate, fmtTime, INSIDE_HOURS, insideSince, todayISO } from "@/lib/format";
 import type { Attendance } from "@/lib/types";
 import { Badge, Card, Empty, PageHeader, Stat, TableWrap } from "@/components/ui";
 import { ActionButton, ActionForm, FormDialog, SubmitButton } from "@/components/forms";
@@ -12,7 +12,7 @@ import { sellDayPass } from "../members/actions";
 import { MemberSelect } from "@/components/member-select";
 import { SimpleBarChart } from "@/components/charts";
 import { deleteRecord } from "@/app/actions";
-import { checkInForm, checkOut } from "./actions";
+import { checkInForm, checkOut, checkOutAll } from "./actions";
 
 export const metadata = { title: "Attendance · SetFit Fitness" };
 
@@ -39,7 +39,10 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
     sb.rpc("attendance_by_hour", { p_from: last30.start, p_to: last30.end, p_tz: tz }),
   ]);
   const visits = (data ?? []) as Attendance[];
-  const inside = visits.filter((v) => !v.check_out);
+  // Open check-ins count as inside for a few hours (people forget to check out)
+  const since = insideSince(day.start);
+  const isInside = (v: Attendance) => isToday && !v.check_out && v.check_in >= since;
+  const inside = visits.filter(isInside);
 
   const hours = Array.from({ length: 24 }, () => 0);
   for (const r of (recent ?? []) as { hour: number; visits: number }[]) hours[r.hour] = Number(r.visits);
@@ -63,7 +66,7 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label={isToday ? "Check-ins today" : `Check-ins ${fmtDate(date)}`} value={visits.length} />
-        <Stat label="Currently inside" value={isToday ? inside.length : "-"} tone="good" />
+        <Stat label="Currently inside" value={isToday ? inside.length : "-"} hint={isToday ? `Open check-ins from the last ${INSIDE_HOURS} hours` : undefined} tone="good" />
         <Stat label="Avg. session" value={avgMins ? `${Math.floor(avgMins / 60)}h ${avgMins % 60}m` : "-"} hint="Checked-out visits" />
         <Stat
           label="Peak hour (30 days)"
@@ -127,10 +130,22 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
             </span>
           }
           action={
+            <div className="flex flex-wrap items-center gap-2">
+              {isToday && visits.some((v) => !v.check_out) && (
+                <ActionButton
+                  action={checkOutAll}
+                  className="btn-secondary btn-sm"
+                  confirmLabel="Check everyone out"
+                  confirmText="Mark everyone still checked in today as checked out now? Use this at closing time."
+                >
+                  <LogOut size={14} /> Check out all
+                </ActionButton>
+              )}
             <Form action="/attendance" className="flex items-center gap-2">
               <input type="date" name="date" defaultValue={date} max={today} className="input w-auto py-1" />
               <button className="btn-secondary btn-sm">Go</button>
             </Form>
+            </div>
           }
         >
           {!visits.length ? (
@@ -158,7 +173,17 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
                       </td>
                       <td>{fmtTime(v.check_in, tz)}</td>
                       <td>{v.check_out ? fmtTime(v.check_out, tz) : "-"}</td>
-                      <td>{v.check_out ? <Badge>Left</Badge> : <Badge tone="good">Inside</Badge>}</td>
+                      <td>
+                        {v.check_out ? (
+                          <Badge>Left</Badge>
+                        ) : isInside(v) ? (
+                          <Badge tone="good">Inside</Badge>
+                        ) : (
+                          <span title={`No check-out; counted as left after ${INSIDE_HOURS} hours`}>
+                            <Badge>Left (no check-out)</Badge>
+                          </span>
+                        )}
+                      </td>
                       <td>
                         <div className="flex justify-end gap-1">
                           {!v.check_out && (

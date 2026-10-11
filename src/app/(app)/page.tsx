@@ -16,6 +16,7 @@ type DashStats = {
   total_members: number;
   active_members: number;
   expiring: number;
+  renewals_due: number;
   expired: number;
   new_members: number;
   checkins_today: number;
@@ -56,14 +57,15 @@ export default async function DashboardPage() {
     sb
       .from("member_overview")
       .select("id, full_name, member_code, phone, plan_name, membership_end, balance_due")
-      .eq("status", "active")
+      .neq("status", "inactive")
+      .eq("membership_kind", "membership")
       .gte("membership_end", today)
       .lte("membership_end", soon)
       .order("membership_end")
       .limit(8),
     sb.from("payments").select("*, members(full_name, member_code)").order("created_at", { ascending: false }).limit(6),
     sb.from("classes").select("*, trainers(full_name)").eq("day_of_week", dow).eq("is_active", true).order("start_time"),
-    sb.rpc("birthdays_on", { p_day: today }).select("id, full_name"),
+    sb.rpc("birthdays_on", { p_day: today }).select("id, full_name, phone"),
   ]);
 
   const s = (statsRes.data ?? {}) as Partial<DashStats>;
@@ -77,10 +79,10 @@ export default async function DashboardPage() {
   const expiring = (expiringRes.data ?? []) as MemberOverview[];
   const payments = (paymentsRes.data ?? []) as Payment[];
   const classes = (classesRes.data ?? []) as GymClass[];
-  const birthdays = (birthdaysRes.data ?? []) as { id: string; full_name: string }[];
+  const birthdays = (birthdaysRes.data ?? []) as { id: string; full_name: string; phone: string | null }[];
 
   const alerts = [
-    { label: "Expiring soon", value: n("expiring"), href: "/payments?tab=expiring", icon: CalendarClock, tone: "warn" as const },
+    { label: "Renewals due (gym + PT)", value: n("renewals_due"), href: "/payments?tab=expiring", icon: CalendarClock, tone: "warn" as const },
     { label: "Expired", value: n("expired"), href: "/members?filter=expired", icon: AlertTriangle, tone: "bad" as const },
     { label: `Pending dues${n("dues_overdue") ? ` · ${n("dues_overdue")} overdue` : ""}`, value: money(n("dues_total"), currency), raw: n("dues_total"), href: "/payments?tab=dues", icon: Wallet, tone: "warn" as const },
     { label: "Lead follow-ups", value: n("followups_due"), href: "/leads?view=due", icon: UserPlus, tone: "brand" as const },
@@ -163,14 +165,21 @@ export default async function DashboardPage() {
           {birthdays.length > 0 && (
             <div className="border-t border-line px-5 py-3 text-sm">
               <p className="text-xs font-medium uppercase tracking-wide text-muted">Birthdays today</p>
-              <p className="mt-1">
-                {birthdays.map((b, i) => (
-                  <span key={b.id}>
-                    {i > 0 && ", "}
-                    <Link href={`/members/${b.id}`} className="text-ink hover:text-brand">{b.full_name}</Link>
-                  </span>
-                ))}
-              </p>
+              <ul className="mt-1 space-y-1">
+                {birthdays.map((b) => {
+                  const wish = waLink(b.phone, `Happy birthday, ${b.full_name}! Wishing you a great year ahead from all of us at ${settings.gym_name}.`);
+                  return (
+                    <li key={b.id} className="flex items-center justify-between gap-2">
+                      <Link href={`/members/${b.id}`} className="text-ink hover:text-brand">{b.full_name}</Link>
+                      {wish && (
+                        <a href={wish} target="_blank" rel="noreferrer" className="btn-ghost btn-sm text-good" title="Send birthday wish on WhatsApp">
+                          <MessageCircle size={14} /> Wish
+                        </a>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
         </Card>

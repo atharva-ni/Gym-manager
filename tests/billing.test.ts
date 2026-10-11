@@ -38,6 +38,15 @@ test("planChangeCredit charges used days and credits the rest", () => {
   assert.equal(planChangeCredit(fee, "2026-09-25").credit, 3000);
 });
 
+test("planChangeCredit ignores frozen days", () => {
+  // 30-day plan frozen 10 days (end pushed from 30 Oct to 9 Nov), changed on 21 Oct
+  const fee = { price: 3000, discount: 0, paid: 3000, start_date: "2026-10-01", end_date: "2026-11-09" };
+  const c = planChangeCredit(fee, "2026-10-21", [{ start_date: "2026-10-05", end_date: "2026-10-14" }]);
+  assert.equal(c.totalDays, 30);
+  assert.equal(c.usedDays, 10); // 20 days elapsed minus 10 frozen
+  assert.equal(c.credit, 2000);
+});
+
 test("refundSuggestion refunds the paid share of unused days", () => {
   const fee = { price: 3000, discount: 0, paid: 3000, start_date: "2026-10-01", end_date: "2026-10-30" };
   assert.equal(refundSuggestion(fee, "2026-10-21"), 1000); // 10 days left
