@@ -41,19 +41,35 @@ export default async function LeadsPage(props: PageProps<"/leads">) {
   const settings = await getSettings();
   const today = todayISO(settings.timezone);
   const sb = await createClient();
-  const { data } = await sb.from("leads").select("*").order("follow_up_on", { ascending: true, nullsFirst: false }).limit(1000);
-  const all = (data ?? []) as Lead[];
+  const LIMIT = 500;
+  const countOf = (status?: string, extra?: (q: ReturnType<typeof base>) => ReturnType<typeof base>) => {
+    let q = base();
+    if (status) q = q.eq("status", status);
+    return (extra ? extra(q) : q).then((r) => r.count ?? 0);
+  };
+  function base() {
+    return sb.from("leads").select("id", { count: "exact", head: true });
+  }
+  let listQuery = sb.from("leads").select("*").order("follow_up_on", { ascending: true, nullsFirst: false }).limit(LIMIT);
+  if (view === "open") listQuery = listQuery.in("status", OPEN);
+  else if (view === "due") listQuery = listQuery.in("status", OPEN).lte("follow_up_on", today);
+  else if (view !== "all") listQuery = listQuery.eq("status", view);
 
-  const counts = Object.fromEntries(LEAD_STATUSES.map((s) => [s, all.filter((l) => l.status === s).length]));
-  const open = all.filter((l) => OPEN.includes(l.status));
-  const due = open.filter((l) => l.follow_up_on && l.follow_up_on <= today);
+  const [{ data }, statusCounts, dueCount, { data: sources }] = await Promise.all([
+    listQuery,
+    Promise.all(LEAD_STATUSES.map((st) => countOf(st))),
+    countOf(undefined, (q) => q.in("status", OPEN).lte("follow_up_on", today)),
+    sb.from("leads").select("source").limit(5000),
+  ]);
+  const leads = (data ?? []) as Lead[];
+  const counts = Object.fromEntries(LEAD_STATUSES.map((st, i) => [st, statusCounts[i]])) as Record<string, number>;
+  const openCount = counts.new + counts.contacted + counts.trial;
+  const totalCount = statusCounts.reduce((a, b) => a + b, 0);
+  const viewCount = view === "open" ? openCount : view === "due" ? dueCount : view === "all" ? totalCount : (counts[view] ?? 0);
   const closed = counts.converted + counts.lost;
   const conversion = closed ? Math.round((counts.converted / closed) * 100) : 0;
-
-  const leads =
-    view === "open" ? open : view === "due" ? due : view === "all" ? all : all.filter((l) => l.status === view);
-
-  const bySource = LEAD_SOURCES.map((s) => ({ label: label(s), value: all.filter((l) => l.source === s).length })).filter((s) => s.value > 0);
+  const sourceRows = (sources ?? []) as { source: string }[];
+  const bySource = LEAD_SOURCES.map((src) => ({ label: label(src), value: sourceRows.filter((l) => l.source === src).length })).filter((x) => x.value > 0);
 
   return (
     <>
@@ -69,8 +85,8 @@ export default async function LeadsPage(props: PageProps<"/leads">) {
 
       <div className="mb-6 grid gap-6 lg:grid-cols-3">
         <div className="grid grid-cols-2 gap-4 lg:col-span-2">
-          <Stat label="Open leads" value={open.length} hint={`${counts.new} new · ${counts.contacted} contacted · ${counts.trial} on trial`} />
-          <Stat label="Follow-ups due" value={due.length} tone={due.length ? "warn" : "neutral"} href="/leads?view=due" hint="Today or overdue" />
+          <Stat label="Open leads" value={openCount} hint={`${counts.new} new · ${counts.contacted} contacted · ${counts.trial} on trial`} />
+          <Stat label="Follow-ups due" value={dueCount} tone={dueCount ? "warn" : "neutral"} href="/leads?view=due" hint="Today or overdue" />
           <Stat label="Converted" value={counts.converted} tone="good" />
           <Stat label="Conversion rate" value={`${conversion}%`} hint="Converted ÷ closed leads" />
         </div>
@@ -82,13 +98,16 @@ export default async function LeadsPage(props: PageProps<"/leads">) {
       <Tabs
         current={view}
         items={[
-          { key: "open", label: `Open (${open.length})`, href: "/leads" },
-          { key: "due", label: `Due (${due.length})`, href: "/leads?view=due" },
+          { key: "open", label: `Open (${openCount})`, href: "/leads" },
+          { key: "due", label: `Due (${dueCount})`, href: "/leads?view=due" },
           ...LEAD_STATUSES.map((s) => ({ key: s, label: `${label(s)} (${counts[s]})`, href: `/leads?view=${s}` })),
           { key: "all", label: "All", href: "/leads?view=all" },
         ]}
       />
 
+      {viewCount > leads.length && (
+        <p className="mb-3 text-sm text-warn">Showing {leads.length} of {viewCount} leads in this view (earliest follow-ups first).</p>
+      )}
       <Card bodyClass="">
         {!leads.length ? (
           <Empty>No leads in this view.</Empty>

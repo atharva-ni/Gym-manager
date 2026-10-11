@@ -14,7 +14,16 @@ import type { ActionState } from "@/lib/types";
 export async function checkIn(memberId: string): Promise<ActionState> {
   const settings = await getSettings();
   const today = todayISO(settings.timezone);
-  type Info = { full_name: string; status: string; membership_end: string | null; membership_start: string | null; balance_due: number };
+  type Info = {
+    full_name: string;
+    status: string;
+    membership_end: string | null;
+    membership_start: string | null;
+    membership_kind: string | null;
+    freeze_start: string | null;
+    freeze_end: string | null;
+    balance_due: number;
+  };
   const found: { info: Info | null } = { info: null };
 
   const res = await runMutation(async (sb) => {
@@ -24,7 +33,7 @@ export async function checkIn(memberId: string): Promise<ActionState> {
       sb.from("attendance").select("id").eq("member_id", memberId).is("check_out", null).gte("check_in", start).limit(1),
       sb
         .from("member_overview")
-        .select("full_name, status, membership_start, membership_end, balance_due")
+        .select("full_name, status, membership_start, membership_end, membership_kind, freeze_start, freeze_end, balance_due")
         .eq("id", memberId)
         .maybeSingle(),
     ]);
@@ -37,9 +46,12 @@ export async function checkIn(memberId: string): Promise<ActionState> {
 
   const warnings: string[] = [];
   if (!m.membership_end) warnings.push("no active membership");
-  else if (m.membership_end < today) warnings.push(`membership expired on ${fmtDate(m.membership_end)}`);
+  else if (m.membership_end < today)
+    warnings.push(m.membership_kind === "pass" ? `day pass ended ${fmtDate(m.membership_end)}` : `membership expired on ${fmtDate(m.membership_end)}`);
   else if (m.membership_start && m.membership_start > today) warnings.push(`membership starts ${fmtDate(m.membership_start)}`);
-  if (m.status === "frozen") warnings.push("membership is frozen");
+  if (m.freeze_start && m.freeze_end && m.freeze_start <= today && today <= m.freeze_end) {
+    warnings.push(`membership is frozen until ${fmtDate(m.freeze_end)} (resume it from their profile)`);
+  } else if (m.status === "frozen") warnings.push("membership is frozen");
   if (Number(m.balance_due) > 0) warnings.push(`${money(m.balance_due, settings.currency)} fee pending`);
 
   return warnings.length

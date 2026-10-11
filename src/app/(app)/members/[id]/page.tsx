@@ -2,19 +2,20 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import {
-  ArrowLeft, CalendarPlus, CreditCard, Dumbbell, LogIn, LogOut, MessageCircle, Minus, Pencil, Plus, Printer, Ruler, Trash2,
+  ArrowLeft, CalendarPlus, CreditCard, Dumbbell, LogIn, LogOut, MessageCircle, Minus, Pause, Pencil, Play, Plus, Printer, Ruler, Trash2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings } from "@/lib/auth";
 import { addDays, age, dayBoundsUTC, fmtDate, fmtDateTime, money, monthStart, todayISO } from "@/lib/format";
-import { daysLeftText, membershipState } from "@/lib/member-state";
-import { label } from "@/lib/constants";
+import { daysLeftText, isFrozen, membershipState } from "@/lib/member-state";
+import { refundSuggestion } from "@/lib/billing";
+import { label, options, PAYMENT_METHODS } from "@/lib/constants";
 import { getPendingFees } from "@/lib/queries";
 import { waLink } from "@/lib/whatsapp";
-import type { Attendance, Measurement, MemberOverview, MembershipBalance, Payment, Plan } from "@/lib/types";
+import type { Attendance, Freeze, Measurement, MemberOverview, MembershipBalance, Payment, Plan, Refund } from "@/lib/types";
 import { Avatar, Badge, Card, Empty, Stat, StatusBadge, TableWrap, Tabs } from "@/components/ui";
 import { ActionButton, FormDialog } from "@/components/forms";
-import { Field, Grid, Hidden, SelectField, TextArea } from "@/components/fields";
+import { Checkbox, Field, Grid, Hidden, SelectField, TextArea } from "@/components/fields";
 import { TrendLine } from "@/components/charts";
 import { CollectFeeFields } from "@/components/collect-fee";
 import { BillFields } from "@/components/bill-fields";
@@ -23,7 +24,8 @@ import { checkIn, checkOut } from "../../attendance/actions";
 import { collectPayment } from "../../payments/actions";
 import { MemberFields } from "../member-fields";
 import {
-  deleteMember, extendMembership, logSession, renewMembership, saveMeasurement, updateMember, updateMembership,
+  changePlan, deleteMember, extendMembership, freezeMembership, logSession, refundMembership, renewMembership, saveMeasurement,
+  unfreezeMembership, updateMember, updateMembership,
 } from "../actions";
 
 const TABS = [
@@ -48,7 +50,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
   const m = memberRow as MemberOverview;
 
   const monthBounds = dayBoundsUTC(monthStart(today), timezone, today);
-  const [msRes, payRes, attRes, measRes, plansRes, trainersRes, visitsRes, fees] = await Promise.all([
+  const [msRes, payRes, attRes, measRes, plansRes, trainersRes, visitsRes, fees, frzRes, refRes] = await Promise.all([
     sb.from("membership_balances").select("*").eq("member_id", id).order("end_date", { ascending: false }),
     sb.from("payments").select("*").eq("member_id", id).order("paid_on", { ascending: false }).order("created_at", { ascending: false }).limit(100),
     sb.from("attendance").select("*").eq("member_id", id).order("check_in", { ascending: false }).limit(60),
@@ -62,13 +64,19 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
       .gte("check_in", monthBounds.start)
       .lt("check_in", monthBounds.end),
     getPendingFees(sb, id),
+    sb.from("membership_freezes").select("*").eq("member_id", id).order("start_date", { ascending: false }),
+    sb.from("refunds").select("*").eq("member_id", id).order("refunded_on", { ascending: false }),
   ]);
+  const freezes = (frzRes.data ?? []) as Freeze[];
+  const refunds = (refRes.data ?? []) as Refund[];
+  const freezesOf = (msId: string) => freezes.filter((f) => f.membership_id === msId);
+  const currentFreeze = freezes.find((f) => f.membership_id === m.membership_id && f.start_date <= today && today <= f.end_date);
   const memberships = (msRes.data ?? []) as MembershipBalance[];
   const payments = (payRes.data ?? []) as Payment[];
   const attendance = (attRes.data ?? []) as Attendance[];
   const measurements = (measRes.data ?? []) as Measurement[];
   const plans = (plansRes.data ?? []) as Plan[];
-  const gymPlans = plans.filter((p) => p.kind !== "personal_training");
+  const gymPlans = plans.filter((p) => p.kind === "membership");
   const ptPlans = plans.filter((p) => p.kind === "personal_training");
   const allTrainers = trainersRes.data ?? [];
   const trainers = allTrainers.filter((t) => t.status === "active");
@@ -78,7 +86,11 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
   const openVisit = attendance.find((a) => !a.check_out && a.check_in >= dayBoundsUTC(today, timezone).start);
   const renewFrom = m.membership_end && m.membership_end >= today ? addDays(m.membership_end, 1) : today;
   const ptFrom = m.pt_end && m.pt_end >= today ? addDays(m.pt_end, 1) : today;
-  const totalPaid = payments.reduce((s, p) => s + Number(p.amount), 0);
+  const totalPaid = payments.reduce((s, p) => s + Number(p.amount), 0) - refunds.reduce((s, r) => s + Number(r.amount), 0);
+  const history = [
+    ...payments.map((p) => ({ kind: "payment" as const, date: p.paid_on, p })),
+    ...refunds.map((r) => ({ kind: "refund" as const, date: r.refunded_on, r })),
+  ].sort((a, b) => b.date.localeCompare(a.date));
   const due = Number(m.balance_due);
   const overdue = due > 0 && !!m.next_due_on && m.next_due_on < today;
   const reminder = waLink(
@@ -200,6 +212,26 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
           </FormDialog>
         </div>
       </div>
+
+      {/* Frozen bar */}
+      {isFrozen(m, today) && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand/30 bg-brand-soft px-4 py-3 text-sm text-brand">
+          <span>
+            <span className="font-semibold">Membership frozen</span> until {fmtDate(m.freeze_end)}. It resumes automatically; the end date has
+            been moved out by the freeze length.
+          </span>
+          {currentFreeze && (
+            <ActionButton
+              action={unfreezeMembership.bind(null, currentFreeze.id)}
+              className="btn-secondary btn-sm"
+              confirmLabel="Resume membership"
+              confirmText="End the freeze today? Unused freeze days are taken back off the end date."
+            >
+              <Play size={14} /> Resume now
+            </ActionButton>
+          )}
+        </div>
+      )}
 
       {/* Dues bar */}
       {due > 0 && (
@@ -333,6 +365,34 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                               )}
                             </div>
                           )}
+                          {freezesOf(x.id).map((f) => {
+                            const live = f.end_date >= today;
+                            return (
+                              <div key={f.id} className="flex flex-wrap items-center gap-2 text-xs">
+                                <Badge tone={live ? "brand" : "neutral"}>
+                                  <Pause size={10} className="mr-1" /> {f.start_date > today ? "Freeze planned" : live ? "Frozen" : "Was frozen"}
+                                </Badge>
+                                <span className="text-muted">
+                                  {fmtDate(f.start_date)} to {fmtDate(f.end_date)} ({f.days}d){f.reason ? ` · ${f.reason}` : ""}
+                                </span>
+                                {live && (
+                                  <ActionButton
+                                    action={unfreezeMembership.bind(null, f.id)}
+                                    className="btn-ghost btn-sm px-1.5"
+                                    confirmLabel={f.start_date > today ? "Cancel freeze" : "Resume membership"}
+                                    confirmText={
+                                      f.start_date > today
+                                        ? "Cancel this planned freeze? The end date moves back."
+                                        : "End the freeze today? Unused freeze days are taken back off the end date."
+                                    }
+                                  >
+                                    {f.start_date > today ? "Cancel" : "Resume now"}
+                                  </ActionButton>
+                                )}
+                              </div>
+                            );
+                          })}
+                          {Number(x.refunded) > 0 && <p className="text-xs text-bad">Refunded {money(x.refunded, currency)}</p>}
                           {x.notes && <p className="whitespace-pre-line text-xs text-muted">{x.notes}</p>}
                         </div>
 
@@ -348,7 +408,81 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                           {owes && x.balance_due_on && (
                             <p className={`text-xs ${x.balance_due_on < today ? "text-bad" : "text-muted"}`}>by {fmtDate(x.balance_due_on)}</p>
                           )}
-                          <div className="flex gap-1">
+                          <div className="flex flex-wrap justify-end gap-1">
+                            {s !== "cancelled" && x.end_date >= today && x.kind !== "pass" && !freezesOf(x.id).some((f) => f.end_date >= today) && (
+                              <FormDialog
+                                title={isPT ? "Freeze PT package" : "Freeze membership"}
+                                trigger={<><Pause size={12} /> Freeze</>}
+                                triggerClass="btn-ghost btn-sm"
+                                action={freezeMembership}
+                                submitLabel="Freeze"
+                              >
+                                <Hidden name="id" value={x.id} />
+                                <p className="text-sm text-muted">
+                                  The plan is paused for the freeze length and its end date ({fmtDate(x.end_date)}) moves out by the same number of days.
+                                  It resumes automatically, or use Resume now to end it early.
+                                </p>
+                                <Grid cols={3}>
+                                  <Field label="Freeze from" name="start_date" type="date" min={today} max={x.end_date} defaultValue={today} required />
+                                  <Field label="Days" name="days" type="number" min={1} max={365} defaultValue={15} required />
+                                  <Field label="Reason" name="reason" placeholder="Travel, injury, exams" />
+                                </Grid>
+                              </FormDialog>
+                            )}
+                            {x.kind === "membership" && s === "active" && gymPlans.length > 0 && (
+                              <FormDialog
+                                title={`Change plan: ${x.plan_name}`}
+                                trigger="Change plan"
+                                triggerClass="btn-ghost btn-sm"
+                                action={changePlan.bind(null, x.id)}
+                                submitLabel="Change plan"
+                                successMessage="Plan changed"
+                                wide
+                              >
+                                <BillFields
+                                  plans={gymPlans.filter((p) => p.id !== x.plan_id)}
+                                  ptPlans={[]}
+                                  trainers={[]}
+                                  currency={currency}
+                                  today={today}
+                                  startDate={today > x.start_date ? today : x.start_date}
+                                  ptStartDate={today}
+                                  chargeAdmission={false}
+                                  changeFrom={x}
+                                />
+                              </FormDialog>
+                            )}
+                            {(Number(x.paid) > 0 || s !== "cancelled") && (
+                              <FormDialog
+                                title={`Refund / cancel: ${x.plan_name}`}
+                                trigger="Refund"
+                                triggerClass="btn-ghost btn-sm"
+                                action={refundMembership}
+                                submitLabel="Save"
+                              >
+                                <Hidden name="id" value={x.id} />
+                                <p className="text-sm text-muted">
+                                  Paid {money(x.paid, currency)} on this plan{Number(x.refunded) > 0 ? ` (after ${money(x.refunded, currency)} already refunded)` : ""}. The
+                                  suggested refund is the paid share of the unused days.
+                                </p>
+                                <Grid>
+                                  <Field
+                                    label="Refund amount"
+                                    name="amount"
+                                    type="number"
+                                    step="0.01"
+                                    min={0}
+                                    max={Number(x.paid)}
+                                    defaultValue={refundSuggestion(x, today)}
+                                    hint="Use 0 to cancel without a refund."
+                                  />
+                                  <SelectField label="Refund mode" name="method" defaultValue="upi" options={options(PAYMENT_METHODS)} />
+                                  <Field label="Date" name="refunded_on" type="date" max={today} defaultValue={today} required />
+                                  <Field label="Reason" name="reason" placeholder="Moving city, medical, unhappy" />
+                                </Grid>
+                                {s !== "cancelled" && <Checkbox label="Cancel this plan (stops it and clears any pending balance)" name="cancel" defaultChecked />}
+                              </FormDialog>
+                            )}
                             <FormDialog
                               title={isPT ? "Extend PT package" : "Extend membership"}
                               trigger="Extend"
@@ -381,7 +515,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                                   defaultValue={x.status}
                                   options={[
                                     { value: "active", label: "Active" },
-                                    { value: "frozen", label: "Frozen" },
+                                    ...(x.status === "frozen" ? [{ value: "frozen", label: "Frozen (old)" }] : []),
                                     { value: "cancelled", label: "Cancelled" },
                                   ]}
                                 />
@@ -420,10 +554,10 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
           {tab === "payments" && (
             <Card
               bodyClass=""
-              title={`${payments.length} payment${payments.length === 1 ? "" : "s"} · ${money(totalPaid, currency)}`}
+              title={`${payments.length} payment${payments.length === 1 ? "" : "s"}${refunds.length ? `, ${refunds.length} refund${refunds.length === 1 ? "" : "s"}` : ""} · net ${money(totalPaid, currency)}`}
               action={collectDialog(<><Plus size={14} /> Record payment</>, "btn-secondary btn-sm")}
             >
-              {!payments.length ? (
+              {!history.length ? (
                 <Empty>No payments recorded.</Empty>
               ) : (
                 <TableWrap>
@@ -439,22 +573,35 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                       </tr>
                     </thead>
                     <tbody>
-                      {payments.map((p) => (
-                        <tr key={p.id}>
-                          <td className="whitespace-nowrap">{fmtDate(p.paid_on)}</td>
-                          <td>{label(p.category)}</td>
-                          <td>{label(p.method)}</td>
-                          <td className="text-xs">{p.receipt_no ?? "-"}</td>
-                          <td className="num font-medium text-ink">{money(p.amount, currency)}</td>
+                      {history.map((h) =>
+                        h.kind === "refund" ? (
+                          <tr key={`r-${h.r.id}`} className="bg-bad-soft/40">
+                            <td className="whitespace-nowrap">{fmtDate(h.r.refunded_on)}</td>
+                            <td>
+                              <Badge tone="bad">Refund</Badge>
+                              {h.r.reason && <span className="block text-xs text-muted">{h.r.reason}</span>}
+                            </td>
+                            <td>{label(h.r.method)}</td>
+                            <td className="text-xs">-</td>
+                            <td className="num font-medium text-bad">- {money(h.r.amount, currency)}</td>
+                            <td />
+                          </tr>
+                        ) : (
+                        <tr key={h.p.id}>
+                          <td className="whitespace-nowrap">{fmtDate(h.p.paid_on)}</td>
+                          <td>{label(h.p.category)}</td>
+                          <td>{label(h.p.method)}</td>
+                          <td className="text-xs">{h.p.receipt_no ?? "-"}</td>
+                          <td className="num font-medium text-ink">{money(h.p.amount, currency)}</td>
                           <td>
                             <div className="flex justify-end gap-1">
-                              <Link href={`/receipt/${p.receipt_no ?? p.id}`} className="btn-ghost btn-sm" target="_blank" title="Print receipt">
+                              <Link href={`/receipt/${h.p.receipt_no ?? h.p.id}`} className="btn-ghost btn-sm" target="_blank" title="Print receipt">
                                 <Printer size={14} />
                               </Link>
                               <ActionButton
-                                action={deleteRecord.bind(null, "payments", p.id)}
+                                action={deleteRecord.bind(null, "payments", h.p.id)}
                                 confirmLabel="Delete payment"
-                                confirmText={`Delete this ${money(p.amount, currency)} payment? The amount will show as due again.`}
+                                confirmText={`Delete this ${money(h.p.amount, currency)} payment? The amount will show as due again.`}
                                 successMessage="Payment deleted"
                               >
                                 <Trash2 size={14} />
@@ -462,7 +609,9 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                             </div>
                           </td>
                         </tr>
-                      ))}
+                      
+                        ),
+                      )}
                     </tbody>
                   </table>
                 </TableWrap>

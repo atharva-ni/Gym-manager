@@ -1,13 +1,14 @@
 import Link from "next/link";
 import Form from "next/form";
-import { ChevronLeft, ChevronRight, LogIn, LogOut, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, LogIn, LogOut, Ticket, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings } from "@/lib/auth";
 import { addDays, dayBoundsUTC, fmtDate, fmtTime, todayISO } from "@/lib/format";
-import { getMemberOptions } from "@/lib/queries";
 import type { Attendance } from "@/lib/types";
 import { Badge, Card, Empty, PageHeader, Stat, TableWrap } from "@/components/ui";
-import { ActionButton, ActionForm, SubmitButton } from "@/components/forms";
+import { ActionButton, ActionForm, FormDialog, SubmitButton } from "@/components/forms";
+import { DayPassFields } from "@/components/day-pass-fields";
+import { sellDayPass } from "../members/actions";
 import { MemberSelect } from "@/components/member-select";
 import { SimpleBarChart } from "@/components/charts";
 import { deleteRecord } from "@/app/actions";
@@ -27,14 +28,14 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
   const day = dayBoundsUTC(date, tz);
   const last30 = dayBoundsUTC(addDays(today, -29), tz, today);
 
-  const [{ data }, members, { data: recent }] = await Promise.all([
+  const [{ data }, { data: passRows }, { data: recent }] = await Promise.all([
     sb
       .from("attendance")
       .select("*, members(full_name, member_code)")
       .gte("check_in", day.start)
       .lt("check_in", day.end)
       .order("check_in", { ascending: false }),
-    getMemberOptions(sb),
+    sb.from("plans").select("id, name, price, duration_days").eq("kind", "pass").eq("is_active", true).order("price"),
     sb.rpc("attendance_by_hour", { p_from: last30.start, p_to: last30.end, p_tz: tz }),
   ]);
   const visits = (data ?? []) as Attendance[];
@@ -75,11 +76,30 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
         <div className="space-y-6">
           <Card title="Quick check-in">
             <ActionForm action={checkInForm} resetOnSuccess>
-              <MemberSelect members={members} required />
+              <MemberSelect required />
               <SubmitButton className="btn-primary w-full">
                 <LogIn size={16} /> Check in
               </SubmitButton>
             </ActionForm>
+          </Card>
+          <Card title="Walk-in visitor">
+            <p className="mb-3 text-sm text-muted">Sell a day pass or trial to someone who isn’t a member yet.</p>
+            <FormDialog
+              title="Day pass / trial"
+              trigger={<><Ticket size={16} /> Sell day pass / trial</>}
+              triggerClass="btn-secondary w-full"
+              action={sellDayPass}
+              submitLabel="Save"
+              successMessage="Day pass sold"
+            >
+              {passRows?.length ? (
+                <DayPassFields passes={passRows} currency={settings.currency} />
+              ) : (
+                <p className="text-sm text-muted">
+                  First add a pass on the <Link href="/plans" className="text-brand underline">Plans page</Link> (type “Day pass / trial”, e.g. 1 day for ₹200).
+                </p>
+              )}
+            </FormDialog>
           </Card>
           <Card title="Busiest hours · last 30 days">
             {hourData.length ? (

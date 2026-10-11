@@ -5,9 +5,9 @@ import { getSettings } from "@/lib/auth";
 import { addDays, fmtDate, money, todayISO } from "@/lib/format";
 import { daysLeftText } from "@/lib/member-state";
 import { label, PAYMENT_CATEGORIES, PAYMENT_METHODS } from "@/lib/constants";
-import { getMemberOptions, getPendingFees, rangeParams } from "@/lib/queries";
+import { getPendingFees, rangeParams } from "@/lib/queries";
 import { waLink } from "@/lib/whatsapp";
-import type { Payment, Plan } from "@/lib/types";
+import type { Payment, Plan, Refund } from "@/lib/types";
 import { Badge, Card, Empty, PageHeader, Stat, TableWrap, Tabs } from "@/components/ui";
 import { ActionButton, FormDialog } from "@/components/forms";
 import { CollectFeeFields } from "@/components/collect-fee";
@@ -43,19 +43,35 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
   if (category) query = query.eq("category", category);
 
   const soon = addDays(today, settings.expiry_alert_days);
-  const [{ data, count }, members, fees, { data: expiringRows }] = await Promise.all([
+  let refundQuery = sb
+    .from("refunds")
+    .select("*, members(full_name, member_code)")
+    .gte("refunded_on", from)
+    .lte("refunded_on", to)
+    .order("refunded_on", { ascending: false })
+    .limit(500);
+  if (method) refundQuery = refundQuery.eq("method", method);
+  const [{ data, count }, { data: refundRows }, fees, { data: expiringRows }] = await Promise.all([
     query,
-    getMemberOptions(sb),
+    category && category !== "refund" ? Promise.resolve({ data: [] }) : refundQuery,
     getPendingFees(sb),
     // Latest gym membership or active PT package ending soon (renewed ones end later, so drop out)
     sb
       .from("member_overview")
       .select("id, full_name, member_code, phone, trainer_id, plan_name, membership_end, pt_plan_name, pt_end, pt_trainer_name, balance_due")
       .neq("status", "inactive")
-      .or(`and(membership_end.gte.${today},membership_end.lte.${soon}),and(pt_end.gte.${today},pt_end.lte.${soon})`)
+      .or(
+        `and(membership_kind.eq.membership,membership_end.gte.${today},membership_end.lte.${soon}),and(pt_end.gte.${today},pt_end.lte.${soon})`,
+      )
       .limit(500),
   ]);
-  const payments = (data ?? []) as Payment[];
+  const payments = category === "refund" ? [] : ((data ?? []) as Payment[]);
+  const refunds = (refundRows ?? []) as Refund[];
+  // Payments and refunds together, newest first
+  const entries = [
+    ...payments.map((p) => ({ kind: "payment" as const, date: p.paid_on, at: p.id, p })),
+    ...refunds.map((r) => ({ kind: "refund" as const, date: r.refunded_on, at: r.id, r })),
+  ].sort((a, b) => b.date.localeCompare(a.date));
 
   type ExpiringRow = {
     id: string;
@@ -92,7 +108,7 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
         ])
       : [{ data: [] }, { data: [] }];
   const activePlans = (planRows ?? []) as Plan[];
-  const gymPlans = activePlans.filter((p) => p.kind !== "personal_training");
+  const gymPlans = activePlans.filter((p) => p.kind === "membership");
   const ptPlans = activePlans.filter((p) => p.kind === "personal_training");
   const trainers = trainerRows ?? [];
 
@@ -104,7 +120,9 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
   const memberById = new Map((dueMembers ?? []).map((m) => [m.id, m]));
   const dues = [...fees].sort((a, b) => (a.balance_due_on ?? "9999").localeCompare(b.balance_due_on ?? "9999"));
 
-  const total = payments.reduce((s, p) => s + Number(p.amount), 0);
+  const refundTotal = refunds.reduce((s, r) => s + Number(r.amount), 0);
+  const gross = payments.reduce((s, p) => s + Number(p.amount), 0);
+  const total = gross - refundTotal;
   const byMethod = new Map<string, number>();
   for (const p of payments) byMethod.set(p.method, (byMethod.get(p.method) ?? 0) + Number(p.amount));
   const topMethod = [...byMethod.entries()].sort((a, b) => b[1] - a[1])[0];
@@ -118,17 +136,21 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
         description="Every payment belongs to a member and is applied to their membership or PT fee. Part payments leave a balance you can collect later."
         actions={
           <FormDialog title="Collect fee" trigger={<><Plus size={16} /> Collect fee</>} action={collectPayment} submitLabel="Save payment" successMessage="Payment saved">
-            <CollectFeeFields members={members} fees={fees} currency={currency} today={today} />
+            <CollectFeeFields currency={currency} today={today} />
           </FormDialog>
         }
       />
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label="Collected in range" value={money(total, currency)} hint={`${payments.length} payments`} />
+        <Stat
+          label="Collected in range"
+          value={money(total, currency)}
+          hint={refundTotal > 0 ? `${money(gross, currency)} received, ${money(refundTotal, currency)} refunded` : `${payments.length} payments`}
+        />
         <Stat
           label={topMethod ? `Via ${label(topMethod[0])}` : "Top method"}
           value={topMethod ? money(topMethod[1], currency) : "-"}
-          hint={topMethod && total ? `${Math.round((topMethod[1] / total) * 100)}% of collections` : undefined}
+          hint={topMethod && gross ? `${Math.round((topMethod[1] / gross) * 100)}% of collections` : undefined}
         />
         <Stat label="Pending dues" value={money(outstanding, currency)} hint={`${dueMemberIds.length} members`} tone="warn" href="/payments?tab=dues" />
         <Stat label="Overdue" value={overdue.length} hint="Past the promised date" tone={overdue.length ? "bad" : "neutral"} href="/payments?tab=dues" />
@@ -240,6 +262,10 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
           )}
         </Card>
       ) : tab === "dues" ? (
+        <>
+        {fees.length >= 1000 && (
+          <p className="mb-3 text-sm text-warn">Showing the first 1,000 pending dues. Collect or filter from the Members page (With dues) to see the rest.</p>
+        )}
         <Card bodyClass="">
           {!dues.length ? (
             <Empty>No pending dues. Every member is fully paid.</Empty>
@@ -314,6 +340,7 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
             </TableWrap>
           )}
         </Card>
+        </>
       ) : (
         <>
           <DateRangeFilter action="/payments" from={from} to={to}>
@@ -333,6 +360,7 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
                 {PAYMENT_CATEGORIES.map((c) => (
                   <option key={c} value={c}>{label(c)}</option>
                 ))}
+                <option value="refund">Refunds</option>
               </select>
             </label>
           </DateRangeFilter>
@@ -343,7 +371,7 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
             </p>
           )}
           <Card bodyClass="">
-            {!payments.length ? (
+            {!entries.length ? (
               <Empty>No payments in this period.</Empty>
             ) : (
               <TableWrap>
@@ -360,40 +388,75 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
                     </tr>
                   </thead>
                   <tbody>
-                    {payments.map((p) => (
-                      <tr key={p.id}>
-                        <td className="whitespace-nowrap">{fmtDate(p.paid_on)}</td>
-                        <td>
-                          <Link href={`/members/${p.member_id}`} className="text-ink hover:text-brand">
-                            {p.members?.full_name ?? "Member"} <span className="text-xs text-muted">{p.members?.member_code}</span>
-                          </Link>
-                        </td>
-                        <td>{label(p.category)}</td>
-                        <td>{label(p.method)}</td>
-                        <td className="text-xs">
-                          {p.receipt_no ?? "-"}
-                          {p.reference && <span className="block text-muted">Ref {p.reference}</span>}
-                        </td>
-                        <td className="num font-medium text-ink">{money(p.amount, currency)}</td>
-                        <td>
-                          <div className="flex justify-end gap-1">
-                            <Link href={`/receipt/${p.receipt_no ?? p.id}`} target="_blank" className="btn-ghost btn-sm">
-                              Receipt
+                    {entries.map((e) =>
+                      e.kind === "refund" ? (
+                        <tr key={`r-${e.r.id}`} className="bg-bad-soft/40">
+                          <td className="whitespace-nowrap">{fmtDate(e.r.refunded_on)}</td>
+                          <td>
+                            <Link href={`/members/${e.r.member_id}`} className="text-ink hover:text-brand">
+                              {e.r.members?.full_name ?? "Member"} <span className="text-xs text-muted">{e.r.members?.member_code}</span>
                             </Link>
-                            <FormDialog title="Edit payment" trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={updatePayment} successMessage="Payment updated">
-                              <PaymentEditFields payment={p} today={today} />
-                            </FormDialog>
-                            <ActionButton action={deleteRecord.bind(null, "payments", p.id)} confirmLabel="Delete payment" confirmText={`Delete this ${money(p.amount, currency)} payment from ${p.members?.full_name ?? "the member"}? The amount will show as due again.`} successMessage="Payment deleted">
-                              <Trash2 size={14} />
-                            </ActionButton>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td>
+                            <Badge tone="bad">Refund</Badge>
+                            {e.r.reason && <span className="block text-xs text-muted">{e.r.reason}</span>}
+                          </td>
+                          <td>{label(e.r.method)}</td>
+                          <td className="text-xs">-</td>
+                          <td className="num font-medium text-bad">- {money(e.r.amount, currency)}</td>
+                          <td>
+                            <div className="flex justify-end">
+                              <ActionButton
+                                action={deleteRecord.bind(null, "refunds", e.r.id)}
+                                confirmLabel="Delete refund"
+                                confirmText={`Delete this ${money(e.r.amount, currency)} refund record? Only do this if it was entered by mistake. A cancelled plan stays cancelled.`}
+                                successMessage="Refund deleted"
+                              >
+                                <Trash2 size={14} />
+                              </ActionButton>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr key={e.p.id}>
+                          <td className="whitespace-nowrap">{fmtDate(e.p.paid_on)}</td>
+                          <td>
+                            <Link href={`/members/${e.p.member_id}`} className="text-ink hover:text-brand">
+                              {e.p.members?.full_name ?? "Member"} <span className="text-xs text-muted">{e.p.members?.member_code}</span>
+                            </Link>
+                          </td>
+                          <td>{label(e.p.category)}</td>
+                          <td>{label(e.p.method)}</td>
+                          <td className="text-xs">
+                            {e.p.receipt_no ?? "-"}
+                            {e.p.reference && <span className="block text-muted">Ref {e.p.reference}</span>}
+                          </td>
+                          <td className="num font-medium text-ink">{money(e.p.amount, currency)}</td>
+                          <td>
+                            <div className="flex justify-end gap-1">
+                              <Link href={`/receipt/${e.p.receipt_no ?? e.p.id}`} target="_blank" className="btn-ghost btn-sm">
+                                Receipt
+                              </Link>
+                              <FormDialog title="Edit payment" trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={updatePayment} successMessage="Payment updated">
+                                <PaymentEditFields payment={e.p} today={today} />
+                              </FormDialog>
+                              <ActionButton
+                                action={deleteRecord.bind(null, "payments", e.p.id)}
+                                confirmLabel="Delete payment"
+                                confirmText={`Delete this ${money(e.p.amount, currency)} payment from ${e.p.members?.full_name ?? "the member"}? Use this only for mistakes; for money given back, use Refund on the member's plan.`}
+                                successMessage="Payment deleted"
+                              >
+                                <Trash2 size={14} />
+                              </ActionButton>
+                            </div>
+                          </td>
+                        </tr>
+                      ),
+                    )}
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td colSpan={5} className="px-4 py-3 text-right text-sm font-medium text-ink">Total</td>
+                      <td colSpan={5} className="px-4 py-3 text-right text-sm font-medium text-ink">{refundTotal > 0 ? "Net total (after refunds)" : "Total"}</td>
                       <td className="num px-4 py-3 font-semibold text-ink">{money(total, currency)}</td>
                       <td />
                     </tr>

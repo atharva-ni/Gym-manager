@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getOwner } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { errorMessage, FormError, type Row } from "@/lib/form";
+import { errorMessage, type Row } from "@/lib/form";
 import type { ActionState } from "@/lib/types";
 
 type DbResult = { error: { message: string; code?: string } | null } | void;
@@ -39,9 +39,3 @@ export function saveRow(sb: SupabaseClient, table: string, id: FormDataEntryValu
   return id ? sb.from(table).update(row).eq("id", String(id)) : sb.from(table).insert(row);
 }
 
-/** Next sequential receipt number for the owner (R-00001, R-00002, ...). */
-export async function nextReceiptNo(sb: SupabaseClient) {
-  const { data, error } = await sb.rpc("next_receipt_no");
-  if (error) throw new FormError(`Could not create a receipt number: ${error.message}`);
-  return data as string;
-}

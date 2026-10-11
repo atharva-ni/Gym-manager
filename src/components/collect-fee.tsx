@@ -1,16 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { MemberSelect, type MemberOption } from "@/components/member-select";
+import { useState, useTransition } from "react";
+import { MemberSelect } from "@/components/member-select";
+import { PaymentModeFields } from "@/components/payment-mode-fields";
+import { pendingFeesFor } from "@/app/actions";
 import { addDays, fmtDate, money } from "@/lib/format";
-import { label, PAYMENT_CATEGORIES, PAYMENT_METHODS } from "@/lib/constants";
+import { label, PAYMENT_CATEGORIES } from "@/lib/constants";
 
 /** A membership or PT package that still has money owed on it. */
 export type PendingFee = {
   id: string;
   member_id: string;
   plan_name: string;
-  kind: "membership" | "personal_training";
+  kind: "membership" | "personal_training" | "pass";
   start_date: string;
   end_date: string;
   balance: number;
@@ -21,36 +23,33 @@ const OTHER = "other";
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
- * Fields for collecting money from a member. Pick the member (or pass
- * `memberId`), choose which pending fee the money goes to, and enter the
- * full amount or a part payment. A discount can waive part of the balance.
- * "Other" covers admission, single PT sessions and anything not on a plan.
+ * Fields for collecting money from a member. Pass `memberId` + `fees` for a
+ * known member, or nothing to show a member search (fees then load for the
+ * member picked). Full or part payment, optional discount / waive-off, and
+ * one or two payment modes. "Other" covers admission, single PT sessions etc.
  */
 export function CollectFeeFields({
-  members,
   memberId: fixedMemberId,
-  fees,
+  fees: initialFees = [],
   currency,
   today,
   defaultFeeId,
 }: {
-  members?: MemberOption[];
   memberId?: string;
-  fees: PendingFee[];
+  fees?: PendingFee[];
   currency: string;
   today: string;
   defaultFeeId?: string;
 }) {
-  const firstFeeOf = (id: string | null) => fees.find((f) => f.member_id === id)?.id ?? OTHER;
   const [memberId, setMemberId] = useState<string | null>(fixedMemberId ?? null);
-  const [feeId, setFeeId] = useState<string>(defaultFeeId ?? firstFeeOf(fixedMemberId ?? null));
+  const [fees, setFees] = useState<PendingFee[]>(initialFees);
+  const [feeId, setFeeId] = useState<string>(defaultFeeId ?? initialFees[0]?.id ?? OTHER);
   const [amount, setAmount] = useState<string | null>(null); // null = pay the full balance
   const [waive, setWaive] = useState("");
+  const [loading, startLoading] = useTransition();
 
-  const memberFees = fees.filter((f) => f.member_id === memberId);
-  const fee = memberFees.find((f) => f.id === feeId);
-  const totalDue = memberFees.reduce((s, f) => s + Number(f.balance), 0);
-
+  const fee = fees.find((f) => f.id === feeId);
+  const totalDue = fees.reduce((s, f) => s + Number(f.balance), 0);
   const balance = fee ? Number(fee.balance) : 0;
   const discount = Math.min(balance, Math.max(0, Number(waive) || 0));
   const payable = r2(balance - discount);
@@ -69,22 +68,30 @@ export function CollectFeeFields({
         <input type="hidden" name="member_id" value={fixedMemberId} />
       ) : (
         <MemberSelect
-          members={members ?? []}
           required
           onChange={(m) => {
             setMemberId(m?.id ?? null);
-            pickFee(firstFeeOf(m?.id ?? null));
+            setFees([]);
+            pickFee(OTHER);
+            if (m) {
+              startLoading(async () => {
+                const list = await pendingFeesFor(m.id);
+                setFees(list);
+                pickFee(list[0]?.id ?? OTHER);
+              });
+            }
           }}
         />
       )}
 
-      {memberId && (
+      {memberId && loading && <p className="text-sm text-muted">Loading pending fees…</p>}
+      {memberId && !loading && (
         <>
           <div className="rounded-lg bg-surface-2 px-3 py-2 text-sm">
             {totalDue > 0 ? (
               <span>
                 Pending fees: <span className="font-semibold text-bad">{money(totalDue, currency)}</span>
-                {memberFees.length > 1 && <span className="text-muted"> across {memberFees.length} plans</span>}
+                {fees.length > 1 && <span className="text-muted"> across {fees.length} plans</span>}
               </span>
             ) : (
               <span className="text-muted">No pending fees. To charge a new plan, use Renew / add plan on the member’s profile.</span>
@@ -94,7 +101,7 @@ export function CollectFeeFields({
           <label className="block">
             <span className="label">Pay towards</span>
             <select className="input" name="membership_id" value={feeId === OTHER ? "" : feeId} onChange={(e) => pickFee(e.target.value || OTHER)}>
-              {memberFees.map((f) => (
+              {fees.map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.kind === "personal_training" ? "PT: " : ""}
                   {f.plan_name} ({fmtDate(f.start_date)} to {fmtDate(f.end_date)}) · due {money(f.balance, currency)}
@@ -103,7 +110,7 @@ export function CollectFeeFields({
               <option value="">Other payment (admission, single PT session, misc.)</option>
             </select>
           </label>
-          <input type="hidden" name="category" value={fee ? fee.kind : ""} disabled={!fee} />
+          <input type="hidden" name="category" value={fee ? (fee.kind === "personal_training" ? "personal_training" : "membership") : ""} disabled={!fee} />
           {!fee && (
             <label className="block">
               <span className="label">Payment for</span>
@@ -122,7 +129,8 @@ export function CollectFeeFields({
                 { key: "half", text: "Half", value: String(r2(payable / 2)) },
                 { key: "custom", text: "Part payment", value: amount ?? "" },
               ].map((o) => {
-                const active = o.key === "full" ? amount === null : o.key === "half" ? amount === String(r2(payable / 2)) : amount !== null && amount !== String(r2(payable / 2));
+                const half = String(r2(payable / 2));
+                const active = o.key === "full" ? amount === null : o.key === "half" ? amount === half : amount !== null && amount !== half;
                 return (
                   <button
                     key={o.key}
@@ -158,18 +166,6 @@ export function CollectFeeFields({
               <span className="label">Date<span className="text-bad"> *</span></span>
               <input className="input" name="paid_on" type="date" defaultValue={today} max={today} required />
             </label>
-            <label className="block">
-              <span className="label">Payment mode</span>
-              <select name="method" defaultValue="upi" className="input">
-                {PAYMENT_METHODS.map((m) => (
-                  <option key={m} value={m}>{label(m)}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="label">UPI / transaction ref.</span>
-              <input className="input" name="reference" placeholder="Optional" />
-            </label>
             {fee && (
               <label className="block">
                 <span className="label">Discount / waive off</span>
@@ -203,6 +199,8 @@ export function CollectFeeFields({
               </label>
             )}
           </div>
+
+          <PaymentModeFields total={paying} currency={currency} />
 
           {fee && (
             <div className="rounded-lg bg-surface-2 p-3 text-sm">

@@ -1,18 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { MemberOption } from "@/components/member-select";
 import type { PendingFee } from "@/components/collect-fee";
-
-/** Lightweight member list for pickers (excludes inactive accounts). */
-export async function getMemberOptions(sb: SupabaseClient): Promise<MemberOption[]> {
-  const { data } = await sb
-    .from("members")
-    .select("id, member_code, full_name, phone")
-    .neq("status", "inactive")
-    .order("full_name")
-    .limit(5000);
-  return (data ?? []) as MemberOption[];
-}
 
 /** Read `from`/`to` search params, defaulting to the current month. */
 export function rangeParams(sp: Record<string, string | string[] | undefined>, today: string) {

@@ -27,6 +27,9 @@ type DashStats = {
   dues_members: number;
   dues_overdue: number;
   pt_clients: number;
+  frozen_now: number;
+  passes_today: number;
+  refunds_month: number;
   open_leads: number;
   followups_due: number;
   low_stock: number;
@@ -106,13 +109,13 @@ export default async function DashboardPage() {
       )}
 
       <div className="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label="Active members" value={n("active_members")} hint={`${n("total_members")} total · +${n("new_members")} this month · ${n("pt_clients")} on PT`} icon={<Users size={16} />} tone="brand" href="/members?filter=active" />
-        <Stat label="Check-ins today" value={n("checkins_today")} hint={`${n("inside_now")} in the gym now`} icon={<ClipboardCheck size={16} />} tone="good" href="/attendance" />
+        <Stat label="Active members" value={n("active_members")} hint={`${n("total_members")} total · +${n("new_members")} this month · ${n("pt_clients")} on PT${n("frozen_now") ? ` · ${n("frozen_now")} frozen` : ""}`} icon={<Users size={16} />} tone="brand" href="/members?filter=active" />
+        <Stat label="Check-ins today" value={n("checkins_today")} hint={`${n("inside_now")} in the gym now${n("passes_today") ? ` · ${n("passes_today")} day pass` : ""}`} icon={<ClipboardCheck size={16} />} tone="good" href="/attendance" />
         <Stat label="Revenue this month" value={money(n("revenue_month"), currency)} hint={`${money(n("revenue_today"), currency)} today`} icon={<TrendingUp size={16} />} tone="brand" href="/reports" />
         <Stat
           label="Net profit this month"
           value={money(net, currency)}
-          hint={`Expenses ${money(n("expenses_month"), currency)}`}
+          hint={`Expenses ${money(n("expenses_month"), currency)}${n("refunds_month") ? ` · refunds ${money(n("refunds_month"), currency)}` : ""}`}
           icon={<Wallet size={16} />}
           tone={net >= 0 ? "good" : "bad"}
           href="/reports"

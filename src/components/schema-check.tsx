@@ -6,13 +6,18 @@ import { createClient } from "@/lib/supabase/server";
  */
 export async function SchemaCheck() {
   const sb = await createClient();
-  const [ms, pay] = await Promise.all([
+  const [ms, pay, v4] = await Promise.all([
     sb.from("memberships").select("kind, balance_due_on, sessions_used").limit(1),
     sb.from("payments").select("receipt_no").limit(1),
+    sb.from("refunds").select("id").limit(1),
   ]);
-  const error = ms.error ?? pay.error;
+  const error = ms.error ?? pay.error ?? v4.error;
   if (!error) return null;
-  const pending = ms.error ? "002_payments_and_pt.sql and then 003_receipts.sql" : "003_receipts.sql";
+  const pending = ms.error
+    ? "002_payments_and_pt.sql, then 003_receipts.sql, then 004_freeze_refunds_passes.sql"
+    : pay.error
+      ? "003_receipts.sql, then 004_freeze_refunds_passes.sql"
+      : "004_freeze_refunds_passes.sql";
 
   const missingTable = error.code === "42P01" || /relation .* does not exist/i.test(error.message);
   return (

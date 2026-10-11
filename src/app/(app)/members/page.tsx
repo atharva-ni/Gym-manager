@@ -19,6 +19,7 @@ const FILTERS = [
   { key: "expired", label: "Expired" },
   { key: "dues", label: "With dues" },
   { key: "frozen", label: "Frozen" },
+  { key: "passes", label: "Day pass visitors" },
   { key: "inactive", label: "Inactive" },
 ];
 
@@ -43,17 +44,22 @@ export default async function MembersPage(props: PageProps<"/members">) {
       query = query.eq("status", "active").gte("membership_end", today);
       break;
     case "expiring":
-      query = query.eq("status", "active").gte("membership_end", today).lte("membership_end", soon);
+      query = query.eq("status", "active").eq("membership_kind", "membership").gte("membership_end", today).lte("membership_end", soon);
       break;
     case "expired":
-      query = query.neq("status", "inactive").lt("membership_end", today);
+      query = query.neq("status", "inactive").eq("membership_kind", "membership").lt("membership_end", today);
+      break;
+    case "passes":
+      query = query.eq("membership_kind", "pass");
       break;
     case "dues":
       query = query.gt("balance_due", 0);
       break;
     case "frozen":
+      query = query.or(`status.eq.frozen,and(freeze_start.lte.${today},freeze_end.gte.${today})`);
+      break;
     case "inactive":
-      query = query.eq("status", filter);
+      query = query.eq("status", "inactive");
       break;
   }
   const { data, count } = await query
@@ -134,6 +140,11 @@ export default async function MembersPage(props: PageProps<"/members">) {
                       <td>{m.phone ?? "-"}</td>
                       <td>
                         {m.plan_name ?? <span className="text-muted">No plan</span>}
+                        {m.membership_kind === "pass" && (
+                          <span className="ml-2 inline-flex">
+                            <Badge>Pass</Badge>
+                          </span>
+                        )}
                         {m.pt_plan_name && (
                           <span className="ml-2 inline-flex">
                             <Badge tone="brand">PT</Badge>

@@ -50,6 +50,9 @@ begin
     values (uid, 'PT 12 sessions', 'personal_training', 12, 30, 6000, 'One-on-one training, 3 sessions a week') returning id into p_pt;
   insert into public.plans (owner_id, name, kind, sessions, duration_days, price, description)
     values (uid, 'PT 36 sessions', 'personal_training', 36, 90, 15000, 'Three months of one-on-one coaching + diet plan') returning id into p_pt3;
+  insert into public.plans (owner_id, name, kind, duration_days, price, description) values
+    (uid, 'Day pass', 'pass', 1, 200, 'Single visit, full gym access'),
+    (uid, 'Trial week', 'pass', 7, 700, 'Seven days to try the gym');
 
   insert into public.trainers (owner_id, full_name, phone, role, specialization, salary, joined_on) values
     (uid, 'Vikram Singh', '+91 98100 00111', 'Head Coach', 'Strength & powerlifting', 35000, current_date - 400) returning id into t1;

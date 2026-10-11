@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getSettings } from "@/lib/auth";
 import { fmtDate, money, todayISO } from "@/lib/format";
 import { label, options, PAYMENT_METHODS, PRODUCT_CATEGORIES } from "@/lib/constants";
-import { getMemberOptions, rangeParams } from "@/lib/queries";
+import { rangeParams } from "@/lib/queries";
 import type { Product, Sale } from "@/lib/types";
 import { Badge, Card, Empty, PageHeader, Stat, TableWrap, Tabs } from "@/components/ui";
 import { ActionButton, FormDialog } from "@/components/forms";
@@ -43,17 +43,16 @@ export default async function InventoryPage(props: PageProps<"/inventory">) {
   const { from, to } = rangeParams(sp, today);
 
   const sb = await createClient();
-  const [{ data: productRows }, { data: saleRows }, members] = await Promise.all([
+  const [{ data: productRows }, { data: saleRows, count: saleCount }] = await Promise.all([
     sb.from("products").select("*").order("name"),
     sb
       .from("sales")
-      .select("*, members(full_name)")
+      .select("*, members(full_name)", { count: "exact" })
       .gte("sold_on", from)
       .lte("sold_on", to)
       .order("sold_on", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(1000),
-    getMemberOptions(sb),
   ]);
   const products = (productRows ?? []) as Product[];
   const sales = (saleRows ?? []) as Sale[];
@@ -86,7 +85,7 @@ export default async function InventoryPage(props: PageProps<"/inventory">) {
                     <SelectField label="Method" name="method" defaultValue="cash" options={options(PAYMENT_METHODS)} />
                     <Field label="Date" name="sold_on" type="date" defaultValue={today} required />
                   </Grid>
-                  <MemberSelect members={members} label="Member (optional)" />
+                  <MemberSelect label="Member (optional)" />
                 </>
               ) : (
                 <p className="text-sm text-muted">No products in stock. Add products or restock first.</p>
@@ -186,6 +185,11 @@ export default async function InventoryPage(props: PageProps<"/inventory">) {
           <DateRangeFilter action="/inventory" from={from} to={to}>
             <input type="hidden" name="tab" value="sales" />
           </DateRangeFilter>
+          {(saleCount ?? 0) > sales.length && (
+            <p className="mb-3 text-sm text-warn">
+              Showing the latest {sales.length} of {saleCount} sales. Narrow the date range to see the rest.
+            </p>
+          )}
           <Card bodyClass="">
             {!sales.length ? (
               <Empty>No sales in this period.</Empty>

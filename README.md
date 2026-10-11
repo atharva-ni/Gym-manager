@@ -8,13 +8,13 @@ An owner-only gym management system built with **Next.js 16** (App Router, Serve
 | --- | --- |
 | **Dashboard** | Active members, today's check-ins and who's inside, month revenue & net profit, alerts for expiring/expired plans, outstanding dues, lead follow-ups, low stock and equipment faults, 6-month revenue vs expenses chart, today's classes, birthdays |
 | **Members** | Searchable, filterable list (active / expiring / expired / with dues / frozen / inactive), auto member codes (`M-0001`), full profile with emergency contact and medical notes, assigned trainer |
-| **Memberships** | Sell or renew plans with discounts and admission fees, partial payments with running balance, extend (freeze/holiday) and edit, full history |
-| **Admission & billing** | One "New admission" screen: member basics (more details optional), gym plan and/or PT package with trainer, discount in ₹ or % with a reason, paid now (full, half, part or nothing) and balance due date, with a live bill summary. Renew / add plan and Add PT use the same bill. Sequential receipt numbers (R-00001), one receipt per bill. |
+| **Memberships** | Sell or renew plans with discounts and admission fees, partial payments with running balance, full history. **Freeze** with dates (end date moves out automatically, resumes on its own, early resume gives days back). **Change / upgrade plan** with credit for unused paid days. **Refund / cancel** with a suggested pro-rata refund. Extend for compensation days. |
+| **Admission & billing** | One "New admission" screen: member basics (more details optional), gym plan and/or PT package with trainer, discount in ₹ or % with a reason, paid now (full, half, part or nothing, by one or **two payment modes** such as cash + UPI) and balance due date, with a live bill summary. **Duplicate mobile check** with a family override. Renew / add plan and Add PT use the same bill. Sequential receipt numbers (R-00001), one receipt per bill. |
 | **Fees & payments** | Every payment belongs to a member and is applied to their membership or PT fee. Pending dues list with one-click collect, discount / waive-off on a balance, WhatsApp reminders, overpayment blocked, receipts showing fee, paid and balance |
 | **Personal training** | PT packages (e.g. 12 sessions / 30 days) sold with a trainer, session tracking, PT dues, trainer PT clients, PT revenue and commission added to salary payouts |
-| **Attendance** | Quick check-in with member search, check-out, day-by-day log, busiest hours chart |
+| **Attendance** | Quick check-in with member search (warns about expired, frozen or unpaid members), check-out, **day pass / trial sales** for walk-ins, day-by-day log, busiest hours chart |
 | **Progress** | Body measurements, BMI and weight trend per member |
-| **Plans** | Membership packages with duration, price, admission fee and active-member counts |
+| **Plans** | Gym memberships, PT packages and day passes / trials with duration, price, admission fee and active counts |
 | **Staff** | Trainers & employees, assigned members/classes, payroll total, one-click salary payout (booked as an expense) |
 | **Classes** | Weekly timetable with trainer, room and capacity |
 | **Expenses** | Categorised spending with breakdown chart |
@@ -43,7 +43,13 @@ An owner-only gym management system built with **Next.js 16** (App Router, Serve
 
 ### Updating an existing database
 
-If you ran `schema.sql` before an update, run the new files in [`supabase/migrations`](supabase/migrations) once, in order, in the SQL Editor. The app shows a "Database update needed" banner when a migration is missing.
+If you ran `schema.sql` before an update, run the new files in [`supabase/migrations`](supabase/migrations) once, in order, in the SQL Editor:
+
+1. `002_payments_and_pt.sql`
+2. `003_receipts.sql`
+3. `004_freeze_refunds_passes.sql`
+
+Each one is safe to run again. The app shows a "Database update needed" banner naming the file when a migration is missing.
 
 ### 2. Configure the app
 
@@ -70,16 +76,34 @@ npm run dev        # http://localhost:3000
 
 Sign in with the owner account, then open **Settings** to set your gym name, currency and timezone.
 
-### Deploy
+### Deploy (Vercel)
 
-Deploy to Vercel (or any Node host): set the same three environment variables and run `npm run build`.
+1. Push this repo to GitHub (already set up at `atharva-ni/Gym-manager`).
+2. On [vercel.com](https://vercel.com) choose **Add New → Project**, import the repo, and add the three environment variables from `.env.local` (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `OWNER_EMAILS`).
+3. Deploy. In Supabase → **Authentication → URL Configuration**, set the Site URL to your Vercel address.
+
+### Keep the free Supabase project awake
+
+Supabase pauses free projects after about a week without activity. The GitHub Action in `.github/workflows/keep-alive.yml` pings it every 3 days. Turn it on by adding two repository secrets in GitHub (**Settings → Secrets and variables → Actions**): `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`. Run it once by hand from the **Actions** tab to check.
+
+## Tests
+
+```bash
+npm test          # billing maths + database tests (embedded Postgres, no Supabase needed)
+npm run typecheck
+npm run lint
+```
+
+The database tests load `schema.sql`, the seed and every migration into an embedded Postgres, and check row-level security, all-or-nothing bills, receipt numbering, freezes, refunds, day passes, plan changes and the upgrade path from the first schema version. GitHub Actions runs lint, typecheck, tests and a build on every push (`.github/workflows/ci.yml`).
 
 ## Project structure
 
 ```
 supabase/
-  schema.sql          tables, triggers, views, RLS policies, reporting functions
+  schema.sql          tables, triggers, views, RLS policies, reporting + transactional write functions
   seed.sql            optional demo data
+  migrations/         upgrades for databases created with an older schema.sql
+tests/                billing unit tests + database tests (node --test)
 src/
   proxy.ts            session refresh + auth redirect (Next 16 "proxy", formerly middleware)
   lib/
@@ -88,6 +112,7 @@ src/
     mutations.ts      runMutation(): auth check, error mapping, revalidation
     form.ts           FormData → typed row parser
     format.ts         money, dates, timezone helpers
+    billing.ts        bill splits, payment-mode allocation, plan-change credit, refunds
   components/         UI kit, form dialogs, member picker, charts, sidebar
   app/
     login/            owner sign-in
@@ -99,5 +124,7 @@ src/
 ## Notes
 
 * Money totals and charts are computed in Postgres functions (`dashboard_stats`, `finance_monthly`, …) so they stay accurate regardless of row counts.
+* Bills, fee collection, freezes and refunds are saved by Postgres functions (`save_bill`, `collect_fee`, `freeze_membership`, `refund_membership`) in one transaction each. Receipt numbers are assigned under a lock, so two saves at the same moment can't get the same number.
+* Refunds are kept as their own records and subtracted in reports. Deleting a payment is only for mistakes.
 * "Today", attendance days and hour-of-day charts use the timezone set in **Settings**.
 * POS sales count as revenue alongside payments. Don't also record them as payments, or they'll be counted twice.

@@ -23,17 +23,18 @@ function PlanFields({ plan, kind }: { plan?: Plan; kind: PlanKind }) {
         options={[
           { value: "membership", label: "Gym membership" },
           { value: "personal_training", label: "Personal training package" },
+          { value: "pass", label: "Day pass / trial" },
         ]}
       />
       <Field
         label="Plan name"
         name="name"
         defaultValue={plan?.name}
-        placeholder={isPT ? "e.g. PT 12 sessions / month" : "e.g. Monthly"}
+        placeholder={isPT ? "e.g. PT 12 sessions / month" : kind === "pass" ? "e.g. Day pass, 3-day trial" : "e.g. Monthly"}
         required
       />
       <Grid cols={3}>
-        <Field label="Duration (days)" name="duration_days" type="number" min={1} defaultValue={plan?.duration_days ?? 30} required />
+        <Field label="Duration (days)" name="duration_days" type="number" min={1} defaultValue={plan?.duration_days ?? (kind === "pass" ? 1 : 30)} required />
         <Field label="Price" name="price" type="number" step="0.01" min={0} defaultValue={plan?.price} required />
         <Field label="Admission fee" name="admission_fee" type="number" step="0.01" min={0} defaultValue={plan?.admission_fee ?? 0} />
       </Grid>
@@ -68,15 +69,16 @@ export default async function PlansPage() {
   const section = (kind: PlanKind) => {
     const list = all.filter((p) => (p.kind ?? "membership") === kind);
     const isPT = kind === "personal_training";
+    const isPass = kind === "pass";
     return (
       <Card
-        title={isPT ? "Personal training packages" : "Gym memberships"}
+        title={isPT ? "Personal training packages" : isPass ? "Day passes & trials" : "Gym memberships"}
         bodyClass=""
         className="mb-6"
         action={
           <FormDialog
-            title={isPT ? "New PT package" : "New membership plan"}
-            trigger={<><Plus size={14} /> {isPT ? "PT package" : "Plan"}</>}
+            title={isPT ? "New PT package" : isPass ? "New day pass / trial" : "New membership plan"}
+            trigger={<><Plus size={14} /> {isPT ? "PT package" : isPass ? "Pass" : "Plan"}</>}
             triggerClass="btn-secondary btn-sm"
             action={savePlan}
           >
@@ -86,7 +88,9 @@ export default async function PlansPage() {
       >
         {!list.length ? (
           <Empty>
-            {isPT
+            {isPass
+              ? "No passes yet. Add one (e.g. Day pass, 1 day, ₹200) to sell walk-in visits from the Attendance page."
+              : isPT
               ? "No PT packages yet. Add one (e.g. 12 sessions in 30 days) to sell personal training."
               : "No plans yet. Create your first membership plan to start enrolling members."}
           </Empty>
@@ -99,8 +103,8 @@ export default async function PlansPage() {
                   <th>Duration</th>
                   {isPT && <th className="num">Sessions</th>}
                   <th className="num">Price</th>
-                  {!isPT && <th className="num">Admission</th>}
-                  <th className="num">{isPT ? "Active clients" : "Active members"}</th>
+                  {!isPT && !isPass && <th className="num">Admission</th>}
+                  <th className="num">{isPT ? "Active clients" : isPass ? "Active now" : "Active members"}</th>
                   <th>Status</th>
                   <th />
                 </tr>
@@ -115,7 +119,7 @@ export default async function PlansPage() {
                     <td>{p.duration_days} days</td>
                     {isPT && <td className="num">{p.sessions ?? "Unlimited"}</td>}
                     <td className="num">{money(p.price, settings.currency)}</td>
-                    {!isPT && <td className="num">{money(p.admission_fee, settings.currency)}</td>}
+                    {!isPT && !isPass && <td className="num">{money(p.admission_fee, settings.currency)}</td>}
                     <td className="num">{counts.get(p.id) ?? 0}</td>
                     <td>{p.is_active ? <Badge tone="good">Active</Badge> : <Badge>Archived</Badge>}</td>
                     <td>
@@ -155,6 +159,7 @@ export default async function PlansPage() {
       />
       {section("membership")}
       {section("personal_training")}
+      {section("pass")}
     </>
   );
 }

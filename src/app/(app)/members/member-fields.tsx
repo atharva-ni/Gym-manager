@@ -1,6 +1,7 @@
 import { Field, Grid, Hidden, SelectField, TextArea } from "@/components/fields";
 import { options, MEMBER_STATUSES } from "@/lib/constants";
 import type { Member } from "@/lib/types";
+import { PhoneField } from "@/components/phone-field";
 
 /**
  * Member details. Only the essentials are shown up front; everything else
@@ -24,16 +25,7 @@ export function MemberFields({
       <Hidden name="id" value={member?.id} />
       <Grid>
         <Field label="Full name" name="full_name" defaultValue={d?.full_name ?? ""} autoComplete="off" required />
-        <Field
-          label="Mobile number"
-          name="phone"
-          type="tel"
-          inputMode="tel"
-          placeholder="98765 43210"
-          defaultValue={d?.phone ?? ""}
-          hint="Used for WhatsApp reminders."
-          required
-        />
+        <PhoneField defaultValue={d?.phone} excludeId={member?.id} />
         <SelectField
           label="Gender"
           name="gender"

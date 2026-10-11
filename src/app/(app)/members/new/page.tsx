@@ -24,7 +24,7 @@ export default async function NewMemberPage(props: PageProps<"/members/new">) {
       : Promise.resolve({ data: null }),
   ]);
   const plans = (planRows ?? []) as Plan[];
-  const gymPlans = plans.filter((p) => p.kind !== "personal_training");
+  const gymPlans = plans.filter((p) => p.kind === "membership");
   const ptPlans = plans.filter((p) => p.kind === "personal_training");
 
   return (

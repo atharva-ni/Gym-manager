@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { addDays, money } from "@/lib/format";
-import { label, PAYMENT_METHODS } from "@/lib/constants";
+import { PaymentModeFields } from "@/components/payment-mode-fields";
+import { planChangeCredit } from "@/lib/billing";
 
 type PlanOpt = {
   id: string;
@@ -18,8 +19,9 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 /**
  * One bill: an optional gym membership plus an optional PT package, a
  * discount (₹ or %), and what is paid now. Shows a live summary and leaves
- * any unpaid amount as a balance with a due date. Mirrors the server-side
- * maths in members/actions.ts (createBill).
+ * any unpaid amount as a balance with a due date. With `changeFrom` it
+ * becomes a plan change: unused days on the old plan are credited. Mirrors
+ * the server-side maths in members/actions.ts (saveBill / changePlan).
  */
 export function BillFields({
   plans,
@@ -32,6 +34,7 @@ export function BillFields({
   defaultTrainerId,
   ptOnly,
   chargeAdmission = true,
+  changeFrom,
 }: {
   plans: PlanOpt[];
   ptPlans: PlanOpt[];
@@ -45,6 +48,8 @@ export function BillFields({
   ptOnly?: boolean;
   /** Tick "charge admission fee" by default (new admissions yes, renewals no). */
   chargeAdmission?: boolean;
+  /** Plan change: the current plan whose unused, paid days become credit. */
+  changeFrom?: { plan_name: string; price: number; discount: number; paid: number; start_date: string; end_date: string };
 }) {
   const [planId, setPlanId] = useState(ptOnly ? "" : (plans[0]?.id ?? ""));
   const [admission, setAdmission] = useState(chargeAdmission);
@@ -53,6 +58,7 @@ export function BillFields({
   const [discType, setDiscType] = useState<"amount" | "percent">("amount");
   const [discValue, setDiscValue] = useState("");
   const [paid, setPaid] = useState<string | null>(null); // null = follow the total
+  const [start, setStart] = useState(startDate);
 
   const plan = plans.find((p) => p.id === planId);
   const pt = ptOn ? ptPlans.find((p) => p.id === ptPlanId) : undefined;
@@ -64,7 +70,10 @@ export function BillFields({
 
   const subtotal = r2(lines.reduce((s, l) => s + l.amount, 0));
   const dv = Number(discValue) || 0;
-  const discount = Math.min(subtotal, Math.max(0, r2(discType === "percent" ? (subtotal * dv) / 100 : dv)));
+  const userDiscount = Math.max(0, r2(discType === "percent" ? (subtotal * dv) / 100 : dv));
+  const change = changeFrom && plan ? planChangeCredit(changeFrom, start || startDate) : null;
+  const credit = change?.credit ?? 0;
+  const discount = Math.min(subtotal, r2(userDiscount + credit));
   const total = r2(subtotal - discount);
   const paidNow = paid === null ? total : Math.min(total, Math.max(0, Number(paid) || 0));
   const balance = r2(total - paidNow);
@@ -76,9 +85,9 @@ export function BillFields({
       <>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block">
-          <span className="label">Gym membership</span>
+          <span className="label">{changeFrom ? "Change to" : "Gym membership"}</span>
           <select name="plan_id" className="input" value={planId} onChange={(e) => { setPlanId(e.target.value); setPaid(null); }}>
-            <option value="">No membership on this bill</option>
+            {!changeFrom && <option value="">No membership on this bill</option>}
             {plans.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name} · {money(p.price, currency)} / {p.duration_days}d
@@ -87,11 +96,29 @@ export function BillFields({
           </select>
         </label>
         <label className="block">
-          <span className="label">Membership starts</span>
-          <input type="date" name="start_date" className="input" defaultValue={startDate} disabled={!plan} />
+          <span className="label">{changeFrom ? "New plan starts" : "Membership starts"}</span>
+          <input
+            type="date"
+            name="start_date"
+            className="input"
+            value={start}
+            min={changeFrom ? today : undefined}
+            max={changeFrom?.end_date}
+            onChange={(e) => {
+              setStart(e.target.value);
+              setPaid(null);
+            }}
+            disabled={!plan}
+          />
         </label>
       </div>
-      {plan && Number(plan.admission_fee) > 0 && (
+      {change && changeFrom && (
+        <p className="rounded-lg bg-brand-soft px-3 py-2 text-sm text-brand">
+          {changeFrom.plan_name}: {change.usedDays} of {change.totalDays} days used ({money(change.usedValue, currency)}).
+          {credit > 0 ? ` ${money(credit, currency)} paid for unused days is credited to the new plan.` : " Nothing extra was paid, so there is no credit."}
+        </p>
+      )}
+      {plan && !changeFrom && Number(plan.admission_fee) > 0 && (
         <label className="flex items-center gap-2 text-sm text-ink-2">
           <input
             type="checkbox"
@@ -179,7 +206,7 @@ export function BillFields({
       </div>
 
       {/* Payment */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         <label className="block">
           <span className="label">Paid now</span>
           <input
@@ -192,31 +219,20 @@ export function BillFields({
             value={paid === null ? String(total) : paid}
             onChange={(e) => setPaid(e.target.value)}
           />
-          <span className="mt-1 flex gap-2 text-xs">
+          <span className="mt-1 flex gap-3 text-xs">
             <button type="button" className="text-brand" onClick={() => setPaid(null)}>Full</button>
             <button type="button" className="text-brand" onClick={() => setPaid(String(r2(total / 2)))}>Half</button>
             <button type="button" className="text-brand" onClick={() => setPaid("0")}>Nothing now</button>
           </span>
         </label>
-        <label className="block">
-          <span className="label">Payment mode</span>
-          <select name="method" className="input" defaultValue="upi">
-            {PAYMENT_METHODS.map((m) => (
-              <option key={m} value={m}>{label(m)}</option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="label">UPI / transaction ref.</span>
-          <input name="reference" className="input" placeholder="Optional" />
-        </label>
+        {balance > 0 && (
+          <label className="block">
+            <span className="label">Balance due by</span>
+            <input type="date" name="balance_due_on" className="input" min={today} defaultValue={addDays(today, 7)} />
+          </label>
+        )}
       </div>
-      {balance > 0 && (
-        <label className="block sm:w-1/3">
-          <span className="label">Balance due by</span>
-          <input type="date" name="balance_due_on" className="input" min={today} defaultValue={addDays(today, 7)} />
-        </label>
-      )}
+      {paidNow > 0 && <PaymentModeFields total={paidNow} currency={currency} />}
 
       {/* Summary */}
       <div className="rounded-lg bg-surface-2 p-4 text-sm">
@@ -230,10 +246,16 @@ export function BillFields({
                 <dd className="tabular-nums">{money(l.amount, currency)}</dd>
               </div>
             ))}
-            {discount > 0 && (
+            {credit > 0 && (
+              <div className="flex justify-between gap-4 text-good">
+                <dt>Credit from {changeFrom?.plan_name}</dt>
+                <dd className="tabular-nums">- {money(Math.min(credit, subtotal), currency)}</dd>
+              </div>
+            )}
+            {discount - Math.min(credit, subtotal) > 0 && (
               <div className="flex justify-between gap-4 text-good">
                 <dt>Discount{discType === "percent" && dv ? ` (${dv}%)` : ""}</dt>
-                <dd className="tabular-nums">- {money(discount, currency)}</dd>
+                <dd className="tabular-nums">- {money(r2(discount - Math.min(credit, subtotal)), currency)}</dd>
               </div>
             )}
             <div className="flex justify-between gap-4 border-t border-line pt-1.5 font-semibold text-ink">

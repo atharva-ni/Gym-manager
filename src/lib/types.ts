@@ -21,7 +21,7 @@ export type Settings = {
   expiry_alert_days: number;
 };
 
-export type PlanKind = "membership" | "personal_training";
+export type PlanKind = "membership" | "personal_training" | "pass";
 
 export type Plan = {
   id: string;
@@ -75,6 +75,9 @@ export type MemberOverview = Member & {
   membership_start: string | null;
   membership_end: string | null;
   membership_status: string | null;
+  membership_kind: PlanKind | null;
+  freeze_start: string | null;
+  freeze_end: string | null;
   balance_due: number;
   next_due_on: string | null;
   pt_plan_name: string | null;
@@ -100,8 +103,29 @@ export type MembershipBalance = {
   status: "active" | "cancelled" | "frozen";
   notes: string | null;
   paid: number;
+  refunded: number;
   balance: number;
   created_at: string;
+};
+
+export type Refund = {
+  id: string;
+  member_id: string;
+  membership_id: string | null;
+  amount: number;
+  method: string;
+  refunded_on: string;
+  reason: string | null;
+  members?: { full_name: string; member_code: string } | null;
+};
+
+export type Freeze = {
+  id: string;
+  membership_id: string;
+  start_date: string;
+  end_date: string;
+  days: number;
+  reason: string | null;
 };
 
 export type Payment = {

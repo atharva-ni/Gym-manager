@@ -58,7 +58,11 @@ export default async function ReportsPage(props: PageProps<"/reports">) {
 
   const breakdown = (pay.data ?? []) as Breakdown[];
   const byMethod = breakdown.filter((b) => b.dimension === "method").map((b) => ({ label: label(b.key), value: Number(b.total) })).sort((a, b) => b.value - a.value);
-  const byCategory = breakdown.filter((b) => b.dimension === "category").map((b) => ({ label: label(b.key), value: Number(b.total) })).sort((a, b) => b.value - a.value);
+  const byCategory = breakdown
+    .filter((b) => b.dimension === "category" && b.key !== "refund")
+    .map((b) => ({ label: label(b.key), value: Number(b.total) }))
+    .sort((a, b) => b.value - a.value);
+  const refundsInRange = -breakdown.filter((b) => b.dimension === "category" && b.key === "refund").reduce((s, b) => s + Number(b.total), 0);
   const expCats = ((exp.data ?? []) as { category: string; total: number }[]).map((e) => ({ label: label(e.category), value: Number(e.total) }));
 
   const planRows = (plans.data ?? []) as { plan_name: string; sold: number; revenue: number }[];
@@ -102,7 +106,11 @@ export default async function ReportsPage(props: PageProps<"/reports">) {
 
       {/* Profit & loss */}
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <Stat label="Membership & fees" value={money(totalPayments, currency)} />
+        <Stat
+          label="Membership & fees"
+          value={money(totalPayments, currency)}
+          hint={refundsInRange > 0 ? `After ${money(refundsInRange, currency)} refunds` : undefined}
+        />
         <Stat label="POS sales" value={money(totalSales, currency)} />
         <Stat label="Total revenue" value={money(revenue, currency)} tone="brand" />
         <Stat label="Expenses" value={money(expenses, currency)} />
