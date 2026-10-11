@@ -1,0 +1,79 @@
+import { Download } from "lucide-react";
+import { getSettings } from "@/lib/auth";
+import { CURRENCIES } from "@/lib/constants";
+import { Card, PageHeader } from "@/components/ui";
+import { ActionForm, SubmitButton } from "@/components/forms";
+import { Field, Grid, SelectField, TextArea } from "@/components/fields";
+import { changePassword, saveSettings } from "./actions";
+
+export const metadata = { title: "Settings · SetFit Fitness" };
+
+const EXPORTS = [
+  { table: "members", label: "Members" },
+  { table: "memberships", label: "Memberships" },
+  { table: "payments", label: "Payments" },
+  { table: "expenses", label: "Expenses" },
+  { table: "attendance", label: "Attendance" },
+  { table: "sales", label: "POS sales" },
+  { table: "leads", label: "Leads" },
+];
+
+export default async function SettingsPage() {
+  const s = await getSettings();
+  const zones = Intl.supportedValuesOf("timeZone");
+  const currencies = CURRENCIES.includes(s.currency) ? CURRENCIES : [s.currency, ...CURRENCIES];
+
+  return (
+    <>
+      <PageHeader title="Settings" description="Gym profile, preferences and account." />
+      <div className="grid gap-6 lg:grid-cols-3">
+        <Card title="Gym profile" className="lg:col-span-2">
+          <ActionForm action={saveSettings} successMessage="Settings saved.">
+            <Grid>
+              <Field label="Gym name" name="gym_name" defaultValue={s.gym_name} required />
+              <Field label="Phone" name="phone" defaultValue={s.phone ?? ""} />
+              <Field label="Email" name="email" type="email" defaultValue={s.email ?? ""} />
+              <SelectField label="Currency" name="currency" defaultValue={s.currency} options={currencies.map((c) => ({ value: c, label: c }))} />
+              <SelectField label="Timezone" name="timezone" defaultValue={s.timezone} options={zones.map((z) => ({ value: z, label: z }))} />
+              <Field
+                label="Expiry alert (days)"
+                name="expiry_alert_days"
+                type="number"
+                min={1}
+                max={60}
+                defaultValue={s.expiry_alert_days}
+                hint="Members are flagged as “expiring” this many days before their plan ends."
+                required
+              />
+              <Field label="GST rate %" name="tax_rate" type="number" step="0.01" min={0} max={28} defaultValue={s.tax_rate} hint="Fees are treated as GST-inclusive; receipts show the GST part. Use 0 if not registered." />
+            </Grid>
+            <TextArea label="Address" name="address" rows={2} defaultValue={s.address} />
+            <p className="text-xs text-muted">Name, address and contact details appear on printed receipts.</p>
+            <div className="flex justify-end">
+              <SubmitButton>Save settings</SubmitButton>
+            </div>
+          </ActionForm>
+        </Card>
+
+        <div className="space-y-6">
+          <Card title="Change password">
+            <ActionForm action={changePassword} successMessage="Password updated." resetOnSuccess>
+              <Field label="New password" name="password" type="password" autoComplete="new-password" minLength={8} required />
+              <Field label="Confirm password" name="confirm" type="password" autoComplete="new-password" minLength={8} required />
+              <SubmitButton className="btn-secondary w-full">Update password</SubmitButton>
+            </ActionForm>
+          </Card>
+          <Card title="Export data (CSV)">
+            <div className="grid grid-cols-2 gap-2">
+              {EXPORTS.map((e) => (
+                <a key={e.table} href={`/export/${e.table}`} className="btn-secondary btn-sm justify-start">
+                  <Download size={14} /> {e.label}
+                </a>
+              ))}
+            </div>
+          </Card>
+        </div>
+      </div>
+    </>
+  );
+}
