@@ -28,9 +28,11 @@ export function SelectField({
   required,
   placeholder,
   className = "",
+  hint,
 }: {
   label: string;
   name: string;
+  hint?: ReactNode;
   options: Opt[];
   defaultValue?: string | null;
   required?: boolean;
@@ -51,6 +53,7 @@ export function SelectField({
           </option>
         ))}
       </select>
+      {hint && <span className="mt-1 block text-xs text-muted">{hint}</span>}
     </label>
   );
 }

@@ -14,6 +14,9 @@ function friendly(err: { message: string; code?: string }) {
     return "This record has payments or other data linked to it, so it can't be deleted. Cancel it or mark it inactive instead.";
   }
   if (err.code === "23514") return "Some values are out of the allowed range.";
+  if (err.code === "PGRST202" || err.code === "42883") {
+    return "Database update needed: run the newest file in supabase/migrations in the Supabase SQL Editor, then try again.";
+  }
   return err.message;
 }
 

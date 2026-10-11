@@ -25,7 +25,7 @@ import { collectPayment } from "../../payments/actions";
 import { MemberFields } from "../member-fields";
 import {
   changePlan, deleteMember, extendMembership, freezeMembership, logSession, refundMembership, renewMembership, saveMeasurement,
-  unfreezeMembership, updateMember, updateMembership,
+  unfreezeMember, unfreezeMembership, updateMember, updateMembership,
 } from "../actions";
 
 const TABS = [
@@ -213,7 +213,23 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
         </div>
       </div>
 
-      {/* Frozen bar */}
+      {/* Frozen bar: a dated freeze, or the old manual "frozen" status */}
+      {state === "frozen" && !isFrozen(m, today) && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand/30 bg-brand-soft px-4 py-3 text-sm text-brand">
+          <span>
+            <span className="font-semibold">Marked as frozen</span> (set by hand, with no freeze dates). Unfreeze to make the membership active
+            again, or use Freeze on the plan below to pause it with dates.
+          </span>
+          <ActionButton
+            action={unfreezeMember.bind(null, m.id)}
+            className="btn-secondary btn-sm"
+            confirmLabel="Unfreeze"
+            confirmText={`Mark ${m.full_name} and their plans as active again?`}
+          >
+            <Play size={14} /> Unfreeze
+          </ActionButton>
+        </div>
+      )}
       {isFrozen(m, today) && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand/30 bg-brand-soft px-4 py-3 text-sm text-brand">
           <span>

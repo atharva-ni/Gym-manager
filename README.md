@@ -48,6 +48,7 @@ If you ran `schema.sql` before an update, run the new files in [`supabase/migrat
 1. `002_payments_and_pt.sql`
 2. `003_receipts.sql`
 3. `004_freeze_refunds_passes.sql`
+4. `005_unfreeze_status.sql`
 
 Each one is safe to run again. The app shows a "Database update needed" banner naming the file when a migration is missing.
 

@@ -756,6 +756,15 @@ begin
   update memberships set end_date = end_date + p_days where id = p_membership_id;
 end $$;
 
+-- Clear the old manual "frozen" flags (member status / plan status) for a member.
+create or replace function public.clear_frozen_status(p_member_id uuid)
+returns void
+language plpgsql volatile security invoker set search_path = public as $$
+begin
+  update members set status = 'active' where id = p_member_id and status = 'frozen';
+  update memberships set status = 'active' where member_id = p_member_id and status = 'frozen';
+end $$;
+
 -- End a freeze early (member resumes on p_resume). Unused freeze days are
 -- taken back off the end date. Resuming on/before the start cancels it.
 create or replace function public.unfreeze_membership(p_freeze_id uuid, p_resume date)
@@ -780,6 +789,8 @@ begin
     update membership_freezes set end_date = p_resume - 1, days = days - v_unused where id = f.id;
   end if;
   update memberships set end_date = end_date - v_unused where id = f.membership_id;
+  -- Also clear any old manual "frozen" flags so the member is fully active again
+  perform clear_frozen_status(f.member_id);
 end $$;
 
 -- Refund money on a membership / PT / pass, optionally cancelling it.

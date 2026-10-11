@@ -360,6 +360,12 @@ export async function unfreezeMembership(freezeId: string): Promise<ActionState>
   return res?.ok ? { ...res, message: "Membership resumed. Unused freeze days removed." } : res;
 }
 
+/** Clear the old manual "frozen" status on a member and their plans. */
+export async function unfreezeMember(memberId: string): Promise<ActionState> {
+  const res = await runMutation((sb) => sb.rpc("clear_frozen_status", { p_member_id: memberId }));
+  return res?.ok ? { ...res, message: "Membership unfrozen." } : res;
+}
+
 /** Refund money on a plan, optionally cancelling it, in one transaction. */
 export async function refundMembership(_: ActionState, fd: FormData): Promise<ActionState> {
   const c = await ctx();

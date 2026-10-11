@@ -52,7 +52,13 @@ export function MemberFields({
               options={trainers.map((t) => ({ value: t.id, label: t.full_name }))}
             />
             {member && (
-              <SelectField label="Status" name="status" defaultValue={member.status} options={options(MEMBER_STATUSES)} />
+              <SelectField
+                label="Status"
+                name="status"
+                defaultValue={member.status}
+                hint="To pause a membership, use Freeze on the plan instead."
+                options={options(MEMBER_STATUSES.filter((st) => st !== "frozen" || member.status === "frozen"))}
+              />
             )}
             <Field label="Emergency contact" name="emergency_name" defaultValue={member?.emergency_name ?? ""} />
             <Field label="Emergency phone" name="emergency_phone" type="tel" defaultValue={member?.emergency_phone ?? ""} />

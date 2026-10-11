@@ -156,7 +156,7 @@ test("day passes are not counted as members", async () => {
   assert.equal((await a(`select membership_kind from member_overview`))[0].membership_kind, "pass");
 });
 
-test("upgrading an existing database: v1 -> 002 -> 003 -> 004 (re-runnable)", async () => {
+test("upgrading an existing database: v1 -> 002 -> 003 -> 004 -> 005 (re-runnable)", async () => {
   const db = await freshDb("tests/fixtures/schema_v1.sql");
   await db.exec(`
     insert into public.plans (owner_id, name, duration_days, price) values ('${A}', 'Old Monthly', 30, 1500);
@@ -166,7 +166,7 @@ test("upgrading an existing database: v1 -> 002 -> 003 -> 004 (re-runnable)", as
     insert into public.payments (owner_id, member_id, membership_id, amount)
       select '${A}', member_id, id, 1000 from public.memberships;
   `);
-  for (const m of ["002_payments_and_pt", "003_receipts", "004_freeze_refunds_passes"]) {
+  for (const m of ["002_payments_and_pt", "003_receipts", "004_freeze_refunds_passes", "005_unfreeze_status"]) {
     await db.exec(sql(`supabase/migrations/${m}.sql`));
     await db.exec(sql(`supabase/migrations/${m}.sql`)); // safe to run twice
   }
@@ -201,4 +201,22 @@ test("plan change closes the old plan and credits unused days in one transaction
   await assert.rejects(a(`select save_bill($1, $2, '[]'::jsonb, $3)`, [member.id, JSON.stringify(next),
     JSON.stringify({ ...close, id: "00000000-0000-0000-0000-000000000000" })]), /not found/);
   assert.equal((await a(`select count(*)::int n from memberships`))[0].n, 2);
+});
+
+test("unfreezing clears old manual frozen statuses too", async () => {
+  const { a, plan, member } = await setup();
+  await a(`select save_bill($1, $2, '[]'::jsonb)`, [member.id, JSON.stringify([line(plan)])]);
+  const [ms] = await a(`select id from memberships`);
+  // Old-style: member and plan marked frozen by hand, plus a dated freeze
+  await a(`update members set status = 'frozen'`);
+  await a(`update memberships set status = 'frozen'`);
+  await a(`select freeze_membership($1, '2026-10-10', 5, null)`, [ms.id]);
+  const [f] = await a(`select id from membership_freezes`);
+  await a(`select unfreeze_membership($1, '2026-10-12')`, [f.id]);
+  assert.deepEqual(await a(`select status from members`), [{ status: "active" }]);
+  assert.deepEqual(await a(`select status from memberships`), [{ status: "active" }]);
+  // Frozen only by hand (no dates): clear_frozen_status fixes it
+  await a(`update members set status = 'frozen'`);
+  await a(`select clear_frozen_status($1)`, [member.id]);
+  assert.deepEqual(await a(`select status from members`), [{ status: "active" }]);
 });
