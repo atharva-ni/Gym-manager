@@ -112,11 +112,12 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
   const ptPlans = activePlans.filter((p) => p.kind === "personal_training");
   const trainers = trainerRows ?? [];
 
-  // Member details for the dues list
+  // Member details for the dues list (only needed on the dues tab)
   const dueMemberIds = [...new Set(fees.map((f) => f.member_id))];
-  const { data: dueMembers } = dueMemberIds.length
-    ? await sb.from("members").select("id, full_name, member_code, phone").in("id", dueMemberIds)
-    : { data: [] };
+  const { data: dueMembers } =
+    tab === "dues" && dueMemberIds.length
+      ? await sb.from("members").select("id, full_name, member_code, phone").in("id", dueMemberIds)
+      : { data: [] };
   const memberById = new Map((dueMembers ?? []).map((m) => [m.id, m]));
   const dues = [...fees].sort((a, b) => (a.balance_due_on ?? "9999").localeCompare(b.balance_due_on ?? "9999"));
 

@@ -5,6 +5,10 @@ import { createClient } from "@/lib/supabase/server";
  * supabase/migrations hasn't been run yet), instead of failing silently.
  */
 export async function SchemaCheck() {
+  // In production, migrations are already run; skip the 4 extra database queries on every page request.
+  if (process.env.NODE_ENV === "production" && process.env.CHECK_SCHEMA !== "true") {
+    return null;
+  }
   const sb = await createClient();
   const [ms, pay, v4, v6] = await Promise.all([
     sb.from("memberships").select("kind, balance_due_on, sessions_used").limit(1),
