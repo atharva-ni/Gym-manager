@@ -79,6 +79,12 @@ npm run dev        # http://localhost:3000
 
 Sign in with the owner account, then open **Settings** to set your gym name, currency and timezone.
 
+### Changing the owner (login) email
+
+1. Add the new address to `OWNER_EMAILS`, keeping the old one for now (e.g. `OWNER_EMAILS=old@mail.com,new@mail.com`) in `.env.local` and in Vercel, then restart / redeploy.
+2. In the app, open **Settings → Login email**, enter the new address and click the confirmation link Supabase emails you (also to the old address if "Secure email change" is on).
+3. Sign in with the new email, then remove the old one from `OWNER_EMAILS`.
+
 ### Deploy (Vercel)
 
 1. Push this repo to GitHub (already set up at `atharva-ni/Gym-manager`).

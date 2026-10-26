@@ -1,11 +1,11 @@
 import { Download } from "lucide-react";
-import { getSettings } from "@/lib/auth";
+import { getOwner, getSettings } from "@/lib/auth";
 import { CURRENCIES } from "@/lib/constants";
 import { Card, PageHeader } from "@/components/ui";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Field, Grid, SelectField, TextArea } from "@/components/fields";
 import { PasswordField } from "@/components/password-field";
-import { changePassword, saveSettings } from "./actions";
+import { changeLoginEmail, changePassword, saveSettings } from "./actions";
 
 export const metadata = { title: "Settings · SetFit Fitness" };
 
@@ -24,6 +24,7 @@ const EXPORTS = [
 
 export default async function SettingsPage() {
   const s = await getSettings();
+  const owner = await getOwner();
   const zones = Intl.supportedValuesOf("timeZone");
   const currencies = CURRENCIES.includes(s.currency) ? CURRENCIES : [s.currency, ...CURRENCIES];
 
@@ -83,6 +84,18 @@ export default async function SettingsPage() {
         </Card>
 
         <div className="space-y-6">
+          <Card title="Login email">
+            <ActionForm action={changeLoginEmail} resetOnSuccess>
+              <p className="text-sm text-ink-2">
+                You sign in with <span className="font-medium text-ink">{owner?.email}</span>.
+              </p>
+              <Field label="New login email" name="email" type="email" autoComplete="email" required />
+              <p className="text-xs text-muted">
+                Add the new address to <code>OWNER_EMAILS</code> first. A confirmation link is emailed; the change applies after you click it.
+              </p>
+              <SubmitButton className="btn-secondary w-full">Change login email</SubmitButton>
+            </ActionForm>
+          </Card>
           <Card title="Change password">
             <ActionForm action={changePassword} successMessage="Password updated." resetOnSuccess>
               <PasswordField label="New password" name="password" autoComplete="new-password" minLength={8} />
