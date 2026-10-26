@@ -27,6 +27,15 @@ function ErrorNote({ state }: { state: ActionState }) {
   );
 }
 
+/**
+ * Dialog shell: a bottom sheet on phones (full width, slides from the bottom,
+ * clear of the home bar), a centred card from the sm breakpoint up.
+ */
+const sheet = (size: string) =>
+  `mx-0 mb-0 mt-auto w-full max-w-none rounded-t-2xl rounded-b-none border border-line bg-surface p-0 text-ink shadow-2xl sm:m-auto sm:w-[calc(100%-2rem)] ${size} sm:rounded-xl`;
+const sheetBody = "flex max-h-[92dvh] flex-col sm:max-h-[88vh]";
+const sheetFooter = "flex justify-end gap-2 border-t border-line px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:py-3";
+
 /** An icon on its own (not text, not icon + text in a fragment) needs a label. */
 const isIconOnly = (node: ReactNode) => isValidElement(node) && node.type !== Fragment;
 
@@ -88,9 +97,9 @@ export function FormDialog({
       <dialog
         ref={ref}
         aria-label={title}
-        className={`m-auto w-[calc(100%-2rem)] ${wide ? "max-w-2xl" : "max-w-lg"} rounded-xl border border-line bg-surface p-0 text-ink shadow-2xl`}
+        className={sheet(wide ? "sm:max-w-2xl" : "sm:max-w-lg")}
       >
-        <form key={formKey} action={formAction} className="flex max-h-[88vh] flex-col">
+        <form key={formKey} action={formAction} className={sheetBody}>
           <header className="flex items-center justify-between border-b border-line px-5 py-3.5">
             <h2 className="font-semibold">{title}</h2>
             <button type="button" className="btn-ghost btn-sm" onClick={() => ref.current?.close()} aria-label="Close">
@@ -101,11 +110,11 @@ export function FormDialog({
             {state !== seen && <ErrorNote state={state} />}
             {children}
           </div>
-          <footer className="flex justify-end gap-2 border-t border-line px-5 py-3">
-            <button type="button" className="btn-secondary" onClick={() => ref.current?.close()}>
+          <footer className={sheetFooter}>
+            <button type="button" className="btn-secondary flex-1 sm:flex-none" onClick={() => ref.current?.close()}>
               Cancel
             </button>
-            <SubmitButton>{submitLabel}</SubmitButton>
+            <SubmitButton className="btn-primary flex-1 sm:flex-none">{submitLabel}</SubmitButton>
           </footer>
         </form>
       </dialog>
@@ -193,19 +202,19 @@ export function ActionButton({
         {children}
       </button>
       {confirmText && (
-        <dialog ref={dialog} aria-label={confirmLabel} className="m-auto w-[calc(100%-2rem)] max-w-sm rounded-xl border border-line bg-surface p-0 text-ink shadow-2xl">
+        <dialog ref={dialog} aria-label={confirmLabel} className={sheet("sm:max-w-sm")}>
           <div className="p-5">
             <p className="font-semibold">{confirmLabel}?</p>
             <p className="mt-2 text-sm text-ink-2">{confirmText}</p>
           </div>
-          <div className="flex justify-end gap-2 border-t border-line px-5 py-3">
-            <button type="button" className="btn-secondary" onClick={() => dialog.current?.close()}>
+          <div className={sheetFooter}>
+            <button type="button" className="btn-secondary flex-1 sm:flex-none" onClick={() => dialog.current?.close()}>
               Cancel
             </button>
             <button
               type="button"
               disabled={pending}
-              className={danger ? "btn bg-bad text-white hover:brightness-110" : "btn-primary"}
+              className={`${danger ? "btn bg-bad text-white hover:brightness-110" : "btn-primary"} min-h-11 flex-1 sm:min-h-0 sm:flex-none`}
               onClick={run}
             >
               {pending ? "Working…" : confirmLabel}
@@ -247,9 +256,9 @@ export function ViewDialog({
       <dialog
         ref={ref}
         aria-label={title}
-        className={`m-auto w-[calc(100%-2rem)] ${wide ? "max-w-2xl" : "max-w-lg"} rounded-xl border border-line bg-surface p-0 text-ink shadow-2xl`}
+        className={sheet(wide ? "sm:max-w-2xl" : "sm:max-w-lg")}
       >
-        <div className="flex max-h-[88vh] flex-col">
+        <div className={`${sheetBody} pb-[env(safe-area-inset-bottom)]`}>
           <header className="flex items-center justify-between border-b border-line px-5 py-3.5">
             <h2 className="font-semibold">{title}</h2>
             <button type="button" className="btn-ghost btn-sm" onClick={() => ref.current?.close()} aria-label="Close">

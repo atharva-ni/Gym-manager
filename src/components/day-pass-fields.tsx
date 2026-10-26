@@ -83,6 +83,7 @@ export function DayPassFields({ passes, currency }: { passes: Pass[]; currency: 
           <input
             name="amount_paid"
             type="number"
+            inputMode="decimal"
             step="0.01"
             min={0}
             max={pass ? Number(pass.price) : undefined}

@@ -13,10 +13,10 @@ export function PageHeader({
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">{title}</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">{title}</h1>
         {description && <p className="mt-1 text-sm text-muted">{description}</p>}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto [&>*]:flex-1 sm:[&>*]:flex-none">{actions}</div>}
     </div>
   );
 }
@@ -37,7 +37,7 @@ export function Card({
   return (
     <section className={`card ${className}`}>
       {(title || action) && (
-        <header className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+        <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-line px-4 py-3 sm:px-5 sm:py-3.5">
           <h2 className="text-sm font-semibold text-ink">{title}</h2>
           {action}
         </header>
@@ -86,7 +86,7 @@ export function Stat({
         <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
         {icon && <span className={`rounded-lg p-1.5 ${toneClass[tone]}`}>{icon}</span>}
       </div>
-      <p className="mt-2 text-2xl font-semibold tabular-nums text-ink">{value}</p>
+      <p className="mt-2 text-xl font-semibold tabular-nums text-ink [overflow-wrap:anywhere] sm:text-2xl">{value}</p>
       {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
     </div>
   );
@@ -97,9 +97,8 @@ export function Empty({ children }: { children: ReactNode }) {
   return <p className="px-5 py-10 text-center text-sm text-muted">{children}</p>;
 }
 
-export function TableWrap({ children }: { children: ReactNode }) {
-  return <div className="overflow-x-auto">{children}</div>;
-}
+// Tables become stacked cards on phones (see table-wrap.tsx)
+export { TableWrap } from "@/components/table-wrap";
 
 export function Avatar({ name, size = "md" }: { name: string; size?: "md" | "lg" }) {
   const parts = name.split(/\s+/).filter(Boolean);
@@ -141,18 +140,20 @@ export function StatusBadge({ status }: { status: string }) {
 
 export function Tabs({ items, current }: { items: { href: string; label: string; key: string }[]; current: string }) {
   return (
-    <div className="mb-4 flex flex-wrap gap-1 rounded-lg border border-line bg-surface p-1 text-sm w-fit">
+    <div className="scrollbar-none -mx-4 mb-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+    <div className="flex w-max gap-1 rounded-lg border border-line bg-surface p-1 text-sm sm:w-fit sm:flex-wrap">
       {items.map((t) => (
         <Link
           key={t.key}
           href={t.href}
-          className={`rounded-md px-3 py-1.5 font-medium ${
+          className={`whitespace-nowrap rounded-md px-3 py-2 font-medium sm:py-1.5 ${
             current === t.key ? "bg-brand text-brand-ink" : "text-ink-2 hover:bg-surface-2"
           }`}
         >
           {t.label}
         </Link>
       ))}
+    </div>
     </div>
   );
 }

@@ -151,7 +151,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
           {openVisit ? (
             <ActionButton action={checkOut.bind(null, openVisit.id)} className="btn-secondary">
               <LogOut size={16} /> Check out
@@ -461,8 +461,8 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                           {x.notes && <p className="whitespace-pre-line text-xs text-muted">{x.notes}</p>}
                         </div>
 
-                        <div className="flex shrink-0 items-start gap-4 sm:flex-col sm:items-end sm:gap-2">
-                          <dl className="grid grid-cols-3 gap-x-4 text-right text-sm tabular-nums">
+                        <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:items-end">
+                          <dl className="grid grid-cols-3 gap-x-4 rounded-lg bg-surface-2 p-2 text-sm tabular-nums sm:bg-transparent sm:p-0 sm:text-right">
                             <dt className="text-xs text-muted">Fee</dt>
                             <dt className="text-xs text-muted">Paid</dt>
                             <dt className="text-xs text-muted">Due</dt>
@@ -473,7 +473,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                           {owes && x.balance_due_on && (
                             <p className={`text-xs ${x.balance_due_on < today ? "text-bad" : "text-muted"}`}>by {fmtDate(x.balance_due_on)}</p>
                           )}
-                          <div className="flex flex-wrap justify-end gap-1">
+                          <div className="flex flex-wrap gap-1 sm:justify-end">
                             {s !== "cancelled" && x.end_date >= today && x.kind !== "pass" && !isCharge && !freezesOf(x.id).some((f) => f.end_date >= today) && (
                               <FormDialog
                                 title={isPT ? "Freeze PT package" : "Freeze membership"}

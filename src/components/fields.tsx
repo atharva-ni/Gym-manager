@@ -2,6 +2,12 @@ import type { InputHTMLAttributes, ReactNode } from "react";
 
 type Opt = { value: string; label: string };
 
+/** Phone keypad for number fields: decimal pad for amounts, digits for counts. */
+function numberKeypad(type: unknown, step: unknown): "decimal" | "numeric" | undefined {
+  if (type !== "number") return undefined;
+  return step !== undefined && String(step) !== "1" ? "decimal" : "numeric";
+}
+
 export function Field({
   label,
   hint,
@@ -14,7 +20,7 @@ export function Field({
         {label}
         {props.required && <span className="text-bad"> *</span>}
       </span>
-      <input className="input" {...props} />
+      <input className="input" inputMode={props.inputMode ?? numberKeypad(props.type, props.step)} {...props} />
       {hint && <span className="mt-1 block text-xs text-muted">{hint}</span>}
     </label>
   );

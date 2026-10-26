@@ -3,6 +3,7 @@ import { Dumbbell } from "lucide-react";
 import { getOwner } from "@/lib/auth";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Field } from "@/components/fields";
+import { PasswordField } from "@/components/password-field";
 import { signIn } from "./actions";
 
 export const metadata = { title: "Sign in · SetFit Fitness" };
@@ -12,7 +13,7 @@ export default async function LoginPage(props: PageProps<"/login">) {
   const { error } = await props.searchParams;
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-bg px-4">
+    <main className="flex min-h-dvh items-center justify-center bg-bg px-4">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
           <span className="mb-3 rounded-xl bg-brand p-3 text-brand-ink">
@@ -29,7 +30,7 @@ export default async function LoginPage(props: PageProps<"/login">) {
           )}
           <ActionForm action={signIn}>
             <Field label="Email" name="email" type="email" autoComplete="email" required />
-            <Field label="Password" name="password" type="password" autoComplete="current-password" required />
+            <PasswordField label="Password" name="password" />
             <SubmitButton className="btn-primary w-full">Sign in</SubmitButton>
           </ActionForm>
         </div>

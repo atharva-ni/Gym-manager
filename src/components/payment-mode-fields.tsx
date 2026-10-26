@@ -62,6 +62,7 @@ export function PaymentModeFields({ total, currency }: { total: number; currency
             <input
               name="amount2"
               type="number"
+            inputMode="decimal"
               step="0.01"
               min={0.01}
               max={Math.max(0.01, r2(total - 0.01))}

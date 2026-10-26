@@ -37,7 +37,7 @@ export function Toaster() {
   }, []);
 
   return (
-    <div className="pointer-events-none fixed inset-x-4 bottom-4 z-[100] flex flex-col items-end gap-2 sm:left-auto sm:w-96" aria-live="polite">
+    <div className="pointer-events-none fixed inset-x-4 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-[100] lg:bottom-4 flex flex-col items-end gap-2 sm:left-auto sm:w-96" aria-live="polite">
       {items.map((t) => {
         const Icon = ICON[t.tone];
         return (

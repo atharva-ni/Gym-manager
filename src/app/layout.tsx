@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/toaster";
@@ -16,6 +16,15 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "SetFit Fitness",
   description: "SetFit Fitness owner dashboard: members, fees, attendance, staff and more.",
+};
+
+// Phones: fit edge-to-edge (safe areas handled in CSS) and tint the browser bar.
+// Zoom stays enabled for accessibility.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#0f1623",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

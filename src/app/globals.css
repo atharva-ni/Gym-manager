@@ -52,6 +52,14 @@ body {
   color: var(--ink);
 }
 
+/* Horizontally scrollable rows (filter chips) without a visible scrollbar */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @utility btn {
   @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition
     disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap;
@@ -73,9 +81,11 @@ body {
   .btn-sm {
     @apply px-2.5 py-1 text-xs;
   }
+  /* 16px text on phones stops iOS zooming into fields; 44px tall for touch */
   .input {
-    @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none
-      placeholder:text-muted focus:border-brand focus:ring-2 focus:ring-brand/20;
+    @apply w-full min-h-11 rounded-lg border border-line bg-surface px-3 py-2 text-base text-ink outline-none
+      placeholder:text-muted focus:border-brand focus:ring-2 focus:ring-brand/20
+      sm:min-h-0 sm:text-sm;
   }
   .label {
     @apply mb-1 block text-xs font-medium text-ink-2;
@@ -105,4 +115,114 @@ body {
 
 dialog::backdrop {
   background: rgb(0 0 0 / 0.45);
+}
+
+/* ---------------------------------------------------------------------
+   Touch devices (UI UX Pro Max: touch-target-size, tap-delay)
+   --------------------------------------------------------------------- */
+a,
+button,
+input,
+select,
+textarea,
+summary,
+label {
+  touch-action: manipulation;
+}
+
+@media (pointer: coarse) {
+  /* Every button / link-button is at least 44x44 on a touch screen */
+  .btn-primary,
+  .btn-secondary,
+  .btn-ghost,
+  .btn-danger {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   Phones: tables become stacked cards (no sideways scrolling).
+   Labels come from the table header (TableWrap sets data-label).
+   --------------------------------------------------------------------- */
+@media (max-width: 639px) {
+  .tbl-wrap {
+    overflow-x: visible;
+  }
+  .tbl-wrap .tbl thead {
+    display: none;
+  }
+  .tbl-wrap .tbl,
+  .tbl-wrap .tbl tbody,
+  .tbl-wrap .tbl tfoot,
+  .tbl-wrap .tbl tr {
+    display: block;
+    width: 100%;
+  }
+  .tbl-wrap .tbl tbody tr,
+  .tbl-wrap .tbl tfoot tr {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .tbl-wrap .tbl tbody tr:last-child {
+    border-bottom: 0;
+  }
+  /* Each cell: label on the left, value(s) stacked on the right */
+  .tbl-wrap .tbl td {
+    display: grid;
+    grid-template-columns: minmax(0, 38%) minmax(0, 1fr);
+    column-gap: 12px;
+    align-items: start;
+    padding: 4px 0;
+    border: 0;
+    text-align: right;
+    background: transparent !important;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .tbl-wrap .tbl td > * {
+    grid-column: 2;
+    justify-self: end;
+  }
+  .tbl-wrap .tbl td::before {
+    content: attr(data-label);
+    font-weight: 400;
+    grid-column: 1;
+    grid-row: 1 / span 20;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--muted);
+    text-align: left;
+  }
+  .tbl-wrap .tbl td[data-label=""],
+  .tbl-wrap .tbl td:not([data-label]),
+  .tbl-wrap .tbl tbody td:first-child {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tbl-wrap .tbl td[data-label=""]::before,
+  .tbl-wrap .tbl td:not([data-label])::before,
+  .tbl-wrap .tbl tbody td:first-child::before {
+    content: none;
+  }
+  .tbl-wrap .tbl td[data-label=""] > *,
+  .tbl-wrap .tbl td:not([data-label]) > *,
+  .tbl-wrap .tbl tbody td:first-child > * {
+    grid-column: 1;
+  }
+  /* First cell is the row's title */
+  .tbl-wrap .tbl tbody td:first-child {
+    text-align: left;
+    font-size: 15px;
+    padding-bottom: 6px;
+  }
+  .tbl-wrap .tbl tbody td:first-child > * {
+    justify-self: start;
+  }
+  /* Last cell holds the row's buttons */
+  .tbl-wrap .tbl tbody td:last-child[data-label=""] {
+    padding-top: 8px;
+  }
+  .tbl-wrap .tbl td:empty {
+    display: none;
+  }
 }

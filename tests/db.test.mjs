@@ -157,7 +157,7 @@ test("day passes are not counted as members", async () => {
   assert.equal((await a(`select membership_kind from member_overview`))[0].membership_kind, "pass");
 });
 
-test("upgrading an existing database: v1 -> 002 ... 006 (re-runnable)", async () => {
+test("upgrading an existing database: v1 -> 002 ... 007 (re-runnable)", async () => {
   const db = await freshDb("tests/fixtures/schema_v1.sql");
   await db.exec(`
     insert into public.plans (owner_id, name, duration_days, price) values ('${A}', 'Old Monthly', 30, 1500);
@@ -167,7 +167,7 @@ test("upgrading an existing database: v1 -> 002 ... 006 (re-runnable)", async ()
     insert into public.payments (owner_id, member_id, membership_id, amount)
       select '${A}', member_id, id, 1000 from public.memberships;
   `);
-  for (const m of ["002_payments_and_pt", "003_receipts", "004_freeze_refunds_passes", "005_unfreeze_status", "006_operations"]) {
+  for (const m of ["002_payments_and_pt", "003_receipts", "004_freeze_refunds_passes", "005_unfreeze_status", "006_operations", "007_performance_optimization"]) {
     await db.exec(sql(`supabase/migrations/${m}.sql`));
     await db.exec(sql(`supabase/migrations/${m}.sql`)); // safe to run twice
   }

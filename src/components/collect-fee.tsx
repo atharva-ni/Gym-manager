@@ -155,6 +155,7 @@ export function CollectFeeFields({
                 className="input"
                 name="amount"
                 type="number"
+            inputMode="decimal"
                 step="0.01"
                 min={fee && discount > 0 ? 0 : 0.01}
                 max={fee ? payable : undefined}
@@ -174,6 +175,7 @@ export function CollectFeeFields({
                   className="input"
                   name="waive"
                   type="number"
+            inputMode="decimal"
                   step="0.01"
                   min={0}
                   max={balance}

@@ -23,7 +23,7 @@ export function ReceiptView({ r, actions }: { r: ReceiptData; actions?: ReactNod
   const showFee = r.items.some((i) => i.fee !== undefined && i.fee !== null);
   const tax = Number(r.gym.tax_rate);
   return (
-    <main className="min-h-screen bg-bg px-4 py-10 print:bg-white print:p-0">
+    <main className="min-h-dvh bg-bg px-4 py-10 print:bg-white print:p-0">
       <div className="mx-auto max-w-md rounded-xl border border-line bg-surface p-8 print:border-0 print:text-black">
         <div className="border-b border-line pb-4 text-center">
           <h1 className="text-xl font-semibold">{r.gym.gym_name}</h1>

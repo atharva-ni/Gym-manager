@@ -4,6 +4,7 @@ import { CURRENCIES } from "@/lib/constants";
 import { Card, PageHeader } from "@/components/ui";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Field, Grid, SelectField, TextArea } from "@/components/fields";
+import { PasswordField } from "@/components/password-field";
 import { changePassword, saveSettings } from "./actions";
 
 export const metadata = { title: "Settings · SetFit Fitness" };
@@ -84,8 +85,8 @@ export default async function SettingsPage() {
         <div className="space-y-6">
           <Card title="Change password">
             <ActionForm action={changePassword} successMessage="Password updated." resetOnSuccess>
-              <Field label="New password" name="password" type="password" autoComplete="new-password" minLength={8} required />
-              <Field label="Confirm password" name="confirm" type="password" autoComplete="new-password" minLength={8} required />
+              <PasswordField label="New password" name="password" autoComplete="new-password" minLength={8} />
+              <PasswordField label="Confirm password" name="confirm" autoComplete="new-password" minLength={8} />
               <SubmitButton className="btn-secondary w-full">Update password</SubmitButton>
             </ActionForm>
           </Card>

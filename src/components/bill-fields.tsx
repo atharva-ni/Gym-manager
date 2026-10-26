@@ -206,6 +206,7 @@ export function BillFields({
           <input
             name="discount_value"
             type="number"
+            inputMode="decimal"
             min={0}
             step="0.01"
             max={discType === "percent" ? 100 : undefined}
@@ -240,6 +241,7 @@ export function BillFields({
           <input
             name="amount_paid"
             type="number"
+            inputMode="decimal"
             min={0}
             max={total}
             step="0.01"

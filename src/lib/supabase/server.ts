@@ -1,8 +1,13 @@
 import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { connection } from "next/server";
 
 export async function createClient() {
+  // Supabase reads are per-request (session + live data), and supabase-js
+  // checks token expiry with Date.now(). Without this, Next.js reports
+  // "used Date.now() while prerendering". connection() adds no extra request.
+  await connection();
   const cookieStore = await cookies();
 
   return createServerClient(
