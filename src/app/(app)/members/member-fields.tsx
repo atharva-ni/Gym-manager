@@ -2,6 +2,7 @@ import { Field, Grid, Hidden, SelectField, TextArea } from "@/components/fields"
 import { options, MEMBER_STATUSES } from "@/lib/constants";
 import type { Member } from "@/lib/types";
 import { PhoneField } from "@/components/phone-field";
+import { PhotoField } from "@/components/photo-field";
 
 /**
  * Member details. Only the essentials are shown up front; everything else
@@ -12,17 +13,21 @@ export function MemberFields({
   defaults,
   trainers,
   today,
+  photoUrl,
 }: {
   member?: Member;
   /** Pre-filled values for a new member (e.g. converted from a lead). */
   defaults?: Pick<Partial<Member>, "full_name" | "phone" | "email" | "notes">;
   trainers: { id: string; full_name: string }[];
   today: string;
+  /** Signed link to the member's current photo, when editing. */
+  photoUrl?: string | null;
 }) {
   const d = member ?? defaults;
   return (
     <>
       <Hidden name="id" value={member?.id} />
+      <PhotoField name="photo" currentUrl={photoUrl} />
       <Grid>
         <Field label="Full name" name="full_name" defaultValue={d?.full_name ?? ""} autoComplete="off" required />
         <PhoneField defaultValue={d?.phone} excludeId={member?.id} />

@@ -1,6 +1,6 @@
 import { Dumbbell, Pencil, Plus, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings } from "@/lib/auth";
+import { getSettings, requireOwner } from "@/lib/auth";
 import { money, todayISO } from "@/lib/format";
 import type { Plan, PlanKind } from "@/lib/types";
 import { Badge, Card, Empty, PageHeader, TableWrap } from "@/components/ui";
@@ -53,6 +53,7 @@ function PlanFields({ plan, kind }: { plan?: Plan; kind: PlanKind }) {
 }
 
 export default async function PlansPage() {
+  await requireOwner(); // staff are sent to check-in
   const settings = await getSettings();
   const sb = await createClient();
   const today = todayISO(settings.timezone);

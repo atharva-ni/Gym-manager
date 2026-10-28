@@ -2,7 +2,8 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 // /r/<token> = receipt links shared with members (read through a token-checked database function)
-const PUBLIC_PATHS = ["/login", "/r/"];
+// /forgot and /auth/confirm = password reset (the email link signs the user in)
+const PUBLIC_PATHS = ["/login", "/forgot", "/auth/", "/r/"];
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -43,7 +44,7 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Signed-in owners hitting /login are redirected by the login page itself,
-  // which also checks OWNER_EMAILS (avoids a loop for non-owner sessions).
+  // Signed-in users hitting /login are redirected by the login page itself,
+  // which also checks the account may use the gym (avoids a loop otherwise).
   return response;
 }

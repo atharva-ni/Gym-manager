@@ -1,12 +1,13 @@
 import { Suspense } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { SchemaCheck } from "@/components/schema-check";
-import { getSettings, requireOwner } from "@/lib/auth";
+import { getSettings, requireAccess } from "@/lib/auth";
 import { signOut } from "@/app/actions";
 
 // The session is read inside Suspense boundaries (here and in each page's
 // loading.tsx) so the static shell can prerender. Every page also calls
-// getSettings() → requireOwner(), and the proxy redirects signed-out visitors.
+// getSettings() → requireAccess() (owner-only pages call requireOwner()), and
+// the proxy redirects signed-out visitors.
 export default function AppLayout({ children }: LayoutProps<"/">) {
   return (
     <div className="min-h-dvh">
@@ -27,7 +28,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
 }
 
 async function SessionSidebar() {
-  const user = await requireOwner();
+  const { user, role, name } = await requireAccess();
   const settings = await getSettings();
-  return <Sidebar gymName={settings.gym_name} email={user.email ?? ""} signOut={signOut} />;
+  return <Sidebar gymName={settings.gym_name} email={user.email ?? ""} staffName={role === "staff" ? name : null} signOut={signOut} />;
 }

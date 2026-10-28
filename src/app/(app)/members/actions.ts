@@ -4,8 +4,10 @@ import { redirect } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { FormError, parseForm, type Row } from "@/lib/form";
 import { runMutation, saveRow } from "@/lib/mutations";
+import { createClient as supabaseFor } from "@/lib/supabase/server";
 import { addDays, money, todayISO } from "@/lib/format";
-import { getSettings } from "@/lib/auth";
+import { getAccess, getSettings } from "@/lib/auth";
+import { PHOTO_BUCKET, photoFromForm, removeFiles, uploadMemberPhoto } from "@/lib/photos";
 import { allocatePayments, phoneDigits, planChangeCredit, r2, split, type ModeSplit } from "@/lib/billing";
 import type { ActionState, MembershipBalance, PlanKind } from "@/lib/types";
 
@@ -229,12 +231,16 @@ type Out = { receipt: string | null; id: string };
 
 export async function createMember(_: ActionState, fd: FormData): Promise<ActionState> {
   const c = await ctx();
+  const access = await getAccess();
   const out: Out = { receipt: null, id: "" };
+  let photo: string | null = null;
   const res = await runMutation(async (sb) => {
     const row = parseForm(fd, MEMBER_SPEC);
     await assertNoDuplicate(sb, fd, row.phone as string);
     // Read and check the bill before creating anything
     const bill = fd.get("plan_id") || fd.get("pt_plan_id") ? await readBillForm(sb, fd, c) : null;
+    const file = photoFromForm(fd);
+    if (file) photo = row.photo_path = await uploadMemberPhoto(sb, access!.gymId, file);
 
     const { data, error } = await sb.from("members").insert(row).select("id").single();
     if (error) return { error };
@@ -253,24 +259,45 @@ export async function createMember(_: ActionState, fd: FormData): Promise<Action
   if (res?.ok) redirect(`/members/${out.id}${out.receipt ? `?receipt=${out.receipt}` : ""}`);
   // The member was created but the bill failed: show the profile with a warning.
   if (out.id) redirect(`/members/${out.id}?warn=membership`);
+  // Nothing was saved: don't keep the uploaded photo
+  if (photo) await removeFiles(await supabaseFor(), PHOTO_BUCKET, [photo]);
   return res;
 }
 
 export async function updateMember(_: ActionState, fd: FormData): Promise<ActionState> {
-  return runMutation(async (sb) => {
+  const access = await getAccess();
+  const id = String(fd.get("id"));
+  let oldPhoto: string | null = null;
+  let newPhoto: string | null = null;
+  let saved = false;
+  const res = await runMutation(async (sb) => {
     const row = parseForm(fd, { ...MEMBER_SPEC, status: "text!" });
-    await assertNoDuplicate(sb, fd, row.phone as string, String(fd.get("id")));
-    return saveRow(sb, "members", fd.get("id"), row);
+    await assertNoDuplicate(sb, fd, row.phone as string, id);
+    const file = photoFromForm(fd);
+    if (file || fd.get("remove_photo") === "on") {
+      oldPhoto = (await sb.from("members").select("photo_path").eq("id", id).single()).data?.photo_path ?? null;
+      row.photo_path = newPhoto = file ? await uploadMemberPhoto(sb, access!.gymId, file) : null;
+    }
+    const r = await saveRow(sb, "members", id, row);
+    saved = !r.error;
+    return r;
   });
+  // Remove whichever photo is no longer used
+  const unused = saved ? oldPhoto : newPhoto;
+  if (unused) await removeFiles(await supabaseFor(), PHOTO_BUCKET, [unused]);
+  return res;
 }
 
 export async function deleteMember(id: string): Promise<ActionState> {
+  if ((await getAccess())?.role !== "owner") return { error: "Only the gym owner can delete members." };
   const res = await runMutation(async (sb) => {
     const { count } = await sb.from("payments").select("id", { count: "exact", head: true }).eq("member_id", id);
     if (count) {
       throw new FormError("This member has payment records, so they can't be deleted. Edit the member and set Status to Inactive instead.");
     }
-    return sb.from("members").delete().eq("id", id);
+    const { data, error } = await sb.from("members").delete().eq("id", id).select("photo_path");
+    if (error) return { error };
+    await removeFiles(sb, PHOTO_BUCKET, data.map((m) => m.photo_path));
   });
   if (res?.ok) redirect("/members");
   return res;

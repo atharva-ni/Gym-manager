@@ -1,6 +1,6 @@
 import { Banknote, History, Pencil, Plus, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings } from "@/lib/auth";
+import { getSettings, requireOwner } from "@/lib/auth";
 import { fmtDate, money, monthLabel, monthStart, todayISO } from "@/lib/format";
 import { options, PAYMENT_METHODS } from "@/lib/constants";
 import type { Trainer } from "@/lib/types";
@@ -47,6 +47,7 @@ function TrainerFields({ t, today }: { t?: Trainer; today: string }) {
 }
 
 export default async function TrainersPage() {
+  await requireOwner(); // staff are sent to check-in
   const settings = await getSettings();
   const today = todayISO(settings.timezone);
   const sb = await createClient();

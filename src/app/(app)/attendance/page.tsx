@@ -2,10 +2,11 @@ import Link from "next/link";
 import Form from "next/form";
 import { ChevronLeft, ChevronRight, LogIn, LogOut, Ticket, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings } from "@/lib/auth";
+import { getSettings, requireAccess } from "@/lib/auth";
+import { photoUrls } from "@/lib/photos";
 import { addDays, dayBoundsUTC, fmtDate, fmtTime, INSIDE_HOURS, insideSince, todayISO } from "@/lib/format";
 import type { Attendance } from "@/lib/types";
-import { Badge, Card, Empty, PageHeader, Stat, TableWrap } from "@/components/ui";
+import { Avatar, Badge, Card, Empty, PageHeader, Stat, TableWrap } from "@/components/ui";
 import { ActionButton, ActionForm, FormDialog, SubmitButton } from "@/components/forms";
 import { DayPassFields } from "@/components/day-pass-fields";
 import { sellDayPass } from "../members/actions";
@@ -19,6 +20,7 @@ export const metadata = { title: "Attendance · SetFit Fitness" };
 export default async function AttendancePage(props: PageProps<"/attendance">) {
   const sp = await props.searchParams;
   const settings = await getSettings();
+  const isOwner = (await requireAccess()).role === "owner";
   const tz = settings.timezone;
   const today = todayISO(tz);
   const date = typeof sp.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : today;
@@ -31,7 +33,7 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
   const [{ data }, { data: passRows }, { data: recent }] = await Promise.all([
     sb
       .from("attendance")
-      .select("*, members(full_name, member_code)")
+      .select("*, members(full_name, member_code, photo_path)")
       .gte("check_in", day.start)
       .lt("check_in", day.end)
       .order("check_in", { ascending: false }),
@@ -39,6 +41,7 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
     sb.rpc("attendance_by_hour", { p_from: last30.start, p_to: last30.end, p_tz: tz }),
   ]);
   const visits = (data ?? []) as Attendance[];
+  const photos = await photoUrls(sb, visits.map((v) => v.members?.photo_path));
   // Open check-ins count as inside for a few hours (people forget to check out)
   const since = insideSince(day.start);
   const isInside = (v: Attendance) => isToday && !v.check_out && v.check_in >= since;
@@ -85,25 +88,27 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
               </SubmitButton>
             </ActionForm>
           </Card>
-          <Card title="Walk-in visitor">
-            <p className="mb-3 text-sm text-muted">Sell a day pass or trial to someone who isn’t a member yet.</p>
-            <FormDialog
-              title="Day pass / trial"
-              trigger={<><Ticket size={16} /> Sell day pass / trial</>}
-              triggerClass="btn-secondary w-full"
-              action={sellDayPass}
-              submitLabel="Save"
-              successMessage="Day pass sold"
-            >
-              {passRows?.length ? (
-                <DayPassFields passes={passRows} currency={settings.currency} />
-              ) : (
-                <p className="text-sm text-muted">
-                  First add a pass on the <Link href="/plans" className="text-brand underline">Plans page</Link> (type “Day pass / trial”, e.g. 1 day for ₹200).
-                </p>
-              )}
-            </FormDialog>
-          </Card>
+          {isOwner && (
+            <Card title="Walk-in visitor">
+              <p className="mb-3 text-sm text-muted">Sell a day pass or trial to someone who isn’t a member yet.</p>
+              <FormDialog
+                title="Day pass / trial"
+                trigger={<><Ticket size={16} /> Sell day pass / trial</>}
+                triggerClass="btn-secondary w-full"
+                action={sellDayPass}
+                submitLabel="Save"
+                successMessage="Day pass sold"
+              >
+                {passRows?.length ? (
+                  <DayPassFields passes={passRows} currency={settings.currency} />
+                ) : (
+                  <p className="text-sm text-muted">
+                    First add a pass on the <Link href="/plans" className="text-brand underline">Plans page</Link> (type “Day pass / trial”, e.g. 1 day for ₹200).
+                  </p>
+                )}
+              </FormDialog>
+            </Card>
+          )}
           <Card title="Busiest hours · last 30 days">
             {hourData.length ? (
               <SimpleBarChart data={hourData} name="Check-ins" height={220} />
@@ -166,10 +171,13 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
                   {visits.map((v) => (
                     <tr key={v.id}>
                       <td>
-                        <Link href={`/members/${v.member_id}`} className="font-medium text-ink hover:text-brand">
-                          {v.members?.full_name ?? "Unknown"}
+                        <Link href={`/members/${v.member_id}`} className="flex items-center gap-3">
+                          <Avatar name={v.members?.full_name ?? "?"} src={v.members?.photo_path ? photos.get(v.members.photo_path) : null} />
+                          <span>
+                            <span className="block font-medium text-ink hover:text-brand">{v.members?.full_name ?? "Unknown"}</span>
+                            <span className="text-xs text-muted">{v.members?.member_code}</span>
+                          </span>
                         </Link>
-                        <span className="ml-2 text-xs text-muted">{v.members?.member_code}</span>
                       </td>
                       <td>{fmtTime(v.check_in, tz)}</td>
                       <td>{v.check_out ? fmtTime(v.check_out, tz) : "-"}</td>
@@ -191,9 +199,11 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
                               <LogOut size={14} /> Check out
                             </ActionButton>
                           )}
-                          <ActionButton action={deleteRecord.bind(null, "attendance", v.id)} confirmLabel="Remove check-in" confirmText={`Remove ${v.members?.full_name ?? "this member"}'s check-in at ${fmtTime(v.check_in, tz)}?`} successMessage="Check-in removed">
-                            <Trash2 size={14} />
-                          </ActionButton>
+                          {isOwner && (
+                            <ActionButton action={deleteRecord.bind(null, "attendance", v.id)} confirmLabel="Remove check-in" confirmText={`Remove ${v.members?.full_name ?? "this member"}'s check-in at ${fmtTime(v.check_in, tz)}?`} successMessage="Check-in removed">
+                              <Trash2 size={14} />
+                            </ActionButton>
+                          )}
                         </div>
                       </td>
                     </tr>

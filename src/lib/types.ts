@@ -67,6 +67,8 @@ export type Member = {
   joined_on: string;
   status: "active" | "frozen" | "inactive";
   notes: string | null;
+  /** Storage path in the private member-photos bucket. */
+  photo_path: string | null;
   created_at: string;
 };
 
@@ -152,7 +154,7 @@ export type Attendance = {
   member_id: string;
   check_in: string;
   check_out: string | null;
-  members?: { full_name: string; member_code: string } | null;
+  members?: { full_name: string; member_code: string; photo_path?: string | null } | null;
 };
 
 export type Measurement = {

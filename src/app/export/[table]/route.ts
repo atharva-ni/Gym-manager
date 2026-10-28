@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getOwner } from "@/lib/auth";
+import { getAccess } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 
 const EXPORTABLE: Record<string, string> = {
@@ -36,7 +36,7 @@ function flatten(row: Record<string, unknown>) {
 
 export async function GET(_req: Request, ctx: RouteContext<"/export/[table]">) {
   const { table } = await ctx.params;
-  if (!(await getOwner())) return new NextResponse("Unauthorized", { status: 401 });
+  if ((await getAccess())?.role !== "owner") return new NextResponse("Unauthorized", { status: 401 });
   const columns = EXPORTABLE[table];
   if (!columns) return new NextResponse("Not found", { status: 404 });
 

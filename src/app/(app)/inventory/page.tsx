@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { PackagePlus, Pencil, Plus, ShoppingCart, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings } from "@/lib/auth";
+import { getSettings, requireOwner } from "@/lib/auth";
 import { addDays, fmtDate, money, todayISO } from "@/lib/format";
 import { label, options, PAYMENT_METHODS, PRODUCT_CATEGORIES } from "@/lib/constants";
 import { rangeParams } from "@/lib/queries";
@@ -11,6 +11,7 @@ import { ActionButton, FormDialog } from "@/components/forms";
 import { Checkbox, Field, Grid, Hidden, SelectField } from "@/components/fields";
 import { MemberSelect } from "@/components/member-select";
 import { DateRangeFilter } from "@/components/date-range";
+import { VoidButton } from "@/components/void-button";
 import { deleteRecord } from "@/app/actions";
 import { recordSale, restockProduct, saveProduct } from "./actions";
 
@@ -37,6 +38,7 @@ function ProductFields({ p }: { p?: Product }) {
 export default async function InventoryPage(props: PageProps<"/inventory">) {
   const sp = await props.searchParams;
   const tab = sp.tab === "sales" ? "sales" : "products";
+  await requireOwner(); // staff are sent to check-in
   const settings = await getSettings();
   const { currency } = settings;
   const today = todayISO(settings.timezone);
@@ -241,9 +243,12 @@ export default async function InventoryPage(props: PageProps<"/inventory">) {
                         <td>{s.on_credit ? <Badge tone="warn">On dues</Badge> : label(s.method)}</td>
                         <td className="num font-medium text-ink">{money(s.total, currency)}</td>
                         <td>
-                          <ActionButton action={deleteRecord.bind(null, "sales", s.id)} confirmLabel="Void sale" confirmText={`Void the sale of ${s.quantity} × ${s.product_name}? Stock will be returned${s.on_credit ? " and the unpaid due removed (not possible once it has been paid)" : ""}.`} successMessage="Sale voided">
-                            <Trash2 size={14} />
-                          </ActionButton>
+                          <VoidButton
+                            table="sales"
+                            id={s.id}
+                            what={`sale of ${s.quantity} × ${s.product_name}`}
+                            note={`Stock is returned${s.on_credit ? " and the unpaid due removed (not possible once it has been paid)" : ""}.`}
+                          />
                         </td>
                       </tr>
                     ))}

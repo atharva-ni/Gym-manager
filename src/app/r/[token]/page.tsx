@@ -10,7 +10,7 @@ export const metadata = { title: "Receipt", robots: { index: false, follow: fals
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type Shared = {
-  type: "payment" | "sale";
+  type: "payment" | "sale" | "void";
   receipt_no: string | null;
   date: string;
   method: string;
@@ -32,6 +32,18 @@ export default async function SharedReceiptPage(props: PageProps<"/r/[token]">) 
   const sb = await createClient();
   const { data } = await sb.rpc("public_receipt", { p_token: token });
   const r = data as Shared | null;
+  if (r?.type === "void") {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-bg px-4">
+        <div className="card max-w-sm p-6 text-center">
+          <p className="text-lg font-semibold text-ink">Receipt cancelled</p>
+          <p className="mt-2 text-sm text-ink-2">
+            Receipt {r.receipt_no ?? ""} was cancelled by the gym. Please ask at the front desk if you have questions.
+          </p>
+        </div>
+      </main>
+    );
+  }
   if (!r || !r.gym) notFound();
 
   const view: ReceiptData = {

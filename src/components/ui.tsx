@@ -100,10 +100,15 @@ export function Empty({ children }: { children: ReactNode }) {
 // Tables become stacked cards on phones (see table-wrap.tsx)
 export { TableWrap } from "@/components/table-wrap";
 
-export function Avatar({ name, size = "md" }: { name: string; size?: "md" | "lg" }) {
+/** Member photo (signed URL in `src`) or their initials. */
+export function Avatar({ name, size = "md", src }: { name: string; size?: "md" | "lg"; src?: string | null }) {
   const parts = name.split(/\s+/).filter(Boolean);
   const text = parts.slice(0, 2).map((p) => p[0]!.toUpperCase()).join("");
-  const dims = size === "lg" ? "size-14 text-lg" : "size-8 text-xs";
+  const dims = size === "lg" ? "size-16 text-lg" : "size-9 text-xs";
+  if (src) {
+    // eslint-disable-next-line @next/next/no-img-element -- signed storage URLs, already small
+    return <img src={src} alt={name} loading="lazy" className={`${dims} shrink-0 rounded-full bg-surface-2 object-cover`} />;
+  }
   return (
     <span className={`inline-flex ${dims} shrink-0 items-center justify-center rounded-full bg-brand-soft font-semibold text-brand`}>
       {text}

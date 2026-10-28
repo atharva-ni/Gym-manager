@@ -34,12 +34,15 @@ export function CollectFeeFields({
   currency,
   today,
   defaultFeeId,
+  canWaive = true,
 }: {
   memberId?: string;
   fees?: PendingFee[];
   currency: string;
   today: string;
   defaultFeeId?: string;
+  /** Staff logins can't give discounts, so the field is hidden for them. */
+  canWaive?: boolean;
 }) {
   const [memberId, setMemberId] = useState<string | null>(fixedMemberId ?? null);
   const [fees, setFees] = useState<PendingFee[]>(initialFees);
@@ -168,7 +171,7 @@ export function CollectFeeFields({
               <span className="label">Date<span className="text-bad"> *</span></span>
               <input className="input" name="paid_on" type="date" defaultValue={today} max={today} required />
             </label>
-            {fee && (
+            {fee && canWaive && (
               <label className="block">
                 <span className="label">Discount / waive off</span>
                 <input

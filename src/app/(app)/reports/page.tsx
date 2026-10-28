@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings } from "@/lib/auth";
+import { getSettings, requireOwner } from "@/lib/auth";
 import { addDays, addMonths, dayBoundsUTC, daysBetween, fmtDate, money, monthLabel, todayISO } from "@/lib/format";
 import { DAYS, label } from "@/lib/constants";
 import { rangeParams } from "@/lib/queries";
@@ -22,6 +22,7 @@ const PRESETS = (today: string) => [
 
 export default async function ReportsPage(props: PageProps<"/reports">) {
   const sp = await props.searchParams;
+  await requireOwner(); // staff are sent to check-in
   const settings = await getSettings();
   const { currency, timezone: tz } = settings;
   const today = todayISO(tz);

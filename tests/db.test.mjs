@@ -9,13 +9,15 @@ const root = new URL("../", import.meta.url);
 const sql = (path) => readFileSync(new URL(path, root), "utf8");
 const A = "11111111-1111-1111-1111-111111111111";
 const B = "22222222-2222-2222-2222-222222222222";
+const S = "33333333-3333-3333-3333-333333333333"; // a staff login
 
 async function freshDb(schemaPath = "supabase/schema.sql") {
   const db = new PGlite();
   await db.exec(`
     create schema auth;
     create table auth.users (id uuid primary key, email text, created_at timestamptz default now());
-    insert into auth.users values ('${A}', 'owner@example.com', now()), ('${B}', 'other@example.com', now());
+    insert into auth.users values ('${A}', 'owner@example.com', now()), ('${B}', 'other@example.com', now()),
+                                  ('${S}', 'Desk@Example.com', now());
     create function auth.uid() returns uuid language sql stable as
       $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
     create role authenticated;
@@ -47,6 +49,7 @@ function as(db, uid) {
 
 async function setup() {
   const db = await freshDb();
+  await db.exec(`insert into gym_settings (owner_id) values ('${A}')`); // A owns the gym
   await grant(db);
   const a = as(db, A);
   const [plan] = await a(`insert into plans (name, duration_days, price, admission_fee) values ('Monthly', 30, 1500, 500) returning *`);
@@ -157,7 +160,7 @@ test("day passes are not counted as members", async () => {
   assert.equal((await a(`select membership_kind from member_overview`))[0].membership_kind, "pass");
 });
 
-test("upgrading an existing database: v1 -> 002 ... 007 (re-runnable)", async () => {
+test("upgrading an existing database: v1 -> 002 ... 009 (re-runnable)", async () => {
   const db = await freshDb("tests/fixtures/schema_v1.sql");
   await db.exec(`
     insert into public.plans (owner_id, name, duration_days, price) values ('${A}', 'Old Monthly', 30, 1500);
@@ -167,7 +170,7 @@ test("upgrading an existing database: v1 -> 002 ... 007 (re-runnable)", async ()
     insert into public.payments (owner_id, member_id, membership_id, amount)
       select '${A}', member_id, id, 1000 from public.memberships;
   `);
-  for (const m of ["002_payments_and_pt", "003_receipts", "004_freeze_refunds_passes", "005_unfreeze_status", "006_operations", "007_performance_optimization"]) {
+  for (const m of ["002_payments_and_pt", "003_receipts", "004_freeze_refunds_passes", "005_unfreeze_status", "006_operations", "007_performance_optimization", "008_member_photos", "009_staff_and_activity"]) {
     await db.exec(sql(`supabase/migrations/${m}.sql`));
     await db.exec(sql(`supabase/migrations/${m}.sql`)); // safe to run twice
   }
@@ -175,6 +178,8 @@ test("upgrading an existing database: v1 -> 002 ... 007 (re-runnable)", async ()
   const a = as(db, A);
   const [m] = await a(`select phone_digits, balance_due::float, membership_kind from member_overview`);
   assert.deepEqual(m, { phone_digits: "9876543210", balance_due: 500, membership_kind: "membership" });
+  assert.equal((await a(`select my_access()->>'role' r`))[0].r, "owner", "the existing owner keeps access");
+  assert.equal((await a(`select photo_path from member_overview`))[0].photo_path, null);
   assert.equal((await a(`select receipt_no from payments`))[0].receipt_no, "R-00001");
   const [{ r }] = await a(`select record_payments($1) r`, [JSON.stringify([{ member_id: (await a(`select id from members`))[0].id, amount: 100, method: "cash" }])]);
   assert.equal(r, "R-00002");
@@ -238,7 +243,7 @@ test("dashboard counts are consistent: passes excluded, renewals include PT", as
   assert.equal(s.renewals_due, 2, "gym + PT ending soon");
 });
 
-test("refund without cancelling lowers the fee, refunds are numbered, deleting a payment reopens a due date", async () => {
+test("refund without cancelling lowers the fee, refunds are numbered, voiding a payment reopens a due date", async () => {
   const { a, plan, member } = await setup();
   await a(`select save_bill($1, $2, $3)`, [member.id, JSON.stringify([line(plan, { price: 1500 })]),
     JSON.stringify([{ line: 0, amount: 1500, method: "cash", paid_on: "2026-10-01" }])]);
@@ -248,7 +253,7 @@ test("refund without cancelling lowers the fee, refunds are numbered, deleting a
   assert.deepEqual(b, { balance: 0, discount: 300, status: "active" }, "no balance reappears");
   assert.equal((await a(`select refund_no from refunds`))[0].refund_no, "RF-00001");
   const [pay] = await a(`select id from payments`);
-  await a(`delete from payments where id = $1`, [pay.id]);
+  await a(`select void_record('payments', $1, 'Entered twice')`, [pay.id]);
   const [m2] = await a(`select balance::float, balance_due_on from membership_balances`);
   assert.ok(m2.balance > 0 && m2.balance_due_on, "balance reopened with a due date");
 });
@@ -283,7 +288,7 @@ test("counter sales get receipts; credit sales go to dues and count as revenue w
   await assert.rejects(a(`select pos_sale($1, 9, 2500, null, 'cash', '2026-10-05', false, null)`, [prod.id]), /in stock/);
   // Voiding the unpaid credit sale removes its due and returns stock
   const [sale] = await a(`select id from sales where on_credit`);
-  await a(`delete from sales where id = $1`, [sale.id]);
+  await a(`select void_record('sales', $1, 'Customer returned it')`, [sale.id]);
   assert.equal((await a(`select count(*)::int n from memberships`))[0].n, 0);
   assert.equal((await a(`select stock from products`))[0].stock, 4);
 });
@@ -349,4 +354,87 @@ test("shared receipt links work without login and reveal nothing else", async ()
   const [{ r: none }] = await run(`select public_receipt(gen_random_uuid()) r`);
   assert.equal(none, null);
   await assert.rejects(run(`select * from payments`), "anon can't read tables directly");
+});
+
+test("staff can check in and collect fees for the owner's gym, and nothing else", async () => {
+  const { db, a, plan, member } = await setup();
+  await a(`insert into staff_accounts (email, full_name) values ('desk@example.com', 'Ravi')`);
+  await a(`insert into expenses (category, amount, description) values ('rent', 15000, 'Rent')`);
+  await a(`select save_bill($1, $2, '[]'::jsonb)`, [member.id, JSON.stringify([line(plan, { price: 1500 })])]);
+  const s = as(db, S);
+  // First sign-in links the login to the staff record (email match ignores case)
+  const [{ acc }] = await s(`select my_access() acc`);
+  assert.deepEqual(acc, { role: "staff", gym_id: A, name: "Ravi" });
+
+  assert.equal((await s(`select count(*)::int n from member_overview`))[0].n, 1);
+  await s(`insert into attendance (member_id) values ($1)`, [member.id]);
+  const [ms] = await s(`select id from memberships`);
+  const [{ r }] = await s(`select collect_fee($1, 0, null, '2026-10-20', $2) r`,
+    [ms.id, JSON.stringify([{ member_id: member.id, membership_id: ms.id, amount: 500, method: "cash" }])]);
+  assert.equal(r, "R-00001");
+  const [pay] = await a(`select owner_id, receipt_no from payments`);
+  assert.deepEqual(pay, { owner_id: A, receipt_no: "R-00001" }, "staff payments land in the owner's gym");
+  assert.equal((await a(`select balance_due_on::text d from memberships`))[0].d, "2026-10-20");
+
+  // Off limits
+  assert.equal((await s(`select count(*)::int n from expenses`))[0].n, 0);
+  assert.equal((await s(`select count(*)::int n from trainers`))[0].n, 0);
+  assert.equal((await s(`select count(*)::int n from activity_log`))[0].n, 0);
+  await assert.rejects(s(`select collect_fee($1, 200, 'waive', null, '[]'::jsonb)`, [ms.id]), /Only the owner/);
+  await assert.rejects(s(`update memberships set price = 1 where id = $1`, [ms.id]), /Only the owner/);
+  await assert.rejects(s(`select void_record('payments', id, 'mistake') from payments`), /Only the owner/);
+  await s(`delete from payments`); // no delete rights: silently nothing
+  assert.equal((await a(`select count(*)::int n from payments`))[0].n, 1);
+  await assert.rejects(s(`insert into members (full_name, phone) values ('X', '9000000009')`));
+
+  // Deactivated staff lose access at once; strangers never had any
+  await a(`update staff_accounts set active = false`);
+  assert.equal((await s(`select count(*)::int n from members`))[0].n, 0);
+  assert.equal((await s(`select my_access()->>'role' r`))[0].r, "inactive");
+  assert.equal((await as(db, B)(`select my_access() r`))[0].r, null);
+  assert.equal((await as(db, B)(`select claim_gym() c`))[0].c, false, "an existing gym can't be claimed");
+});
+
+test("money records can only be voided with a reason, and the activity log keeps them", async () => {
+  const { db, a, plan, member } = await setup();
+  await a(`select save_bill($1, $2, $3)`, [member.id, JSON.stringify([line(plan, { price: 1500 })]),
+    JSON.stringify([{ line: 0, amount: 1500, method: "upi", paid_on: "2026-10-01" }])]);
+  const [pay] = await a(`select id, share_token from payments`);
+  await assert.rejects(a(`delete from payments where id = $1`, [pay.id]), /Void them with a reason/);
+  await assert.rejects(a(`select void_record('payments', $1, '')`, [pay.id]), /reason/);
+  await a(`select void_record('payments', $1, 'Wrong member')`, [pay.id]);
+  assert.equal((await a(`select count(*)::int n from payments`))[0].n, 0);
+
+  const log = await a(`select table_name, action, actor_role, actor_email, reason, before->>'receipt_no' receipt
+                         from activity_log where table_name = 'payments' order by at, action`);
+  assert.deepEqual(log.map((l) => l.action).sort(), ["insert", "void"]);
+  const v = log.find((l) => l.action === "void");
+  assert.deepEqual(v, { table_name: "payments", action: "void", actor_role: "owner", actor_email: "owner@example.com",
+    reason: "Wrong member", receipt: "R-00001" });
+  // Updates keep only what changed
+  await a(`update members set notes = 'Prefers mornings' where id = $1`, [member.id]);
+  const [u] = await a(`select after from activity_log where table_name = 'members' and action = 'update'`);
+  assert.deepEqual(u.after, { notes: "Prefers mornings" });
+  // The log can't be edited from the app
+  await a(`update activity_log set reason = 'x'`);
+  await a(`delete from activity_log`);
+  assert.equal((await a(`select count(*)::int n from activity_log where reason = 'Wrong member'`))[0].n, 1);
+  // The shared receipt link now says it was cancelled
+  await db.exec(`grant usage on schema public to anon;`);
+  await db.exec(`set role anon;`);
+  const { rows } = await db.query(`select public_receipt($1) r`, [pay.share_token]);
+  await db.exec(`reset role;`);
+  assert.deepEqual(rows[0].r, { type: "void", receipt_no: "R-00001" });
+});
+
+test("a brand-new install is claimed by the first account to sign in", async () => {
+  const db = await freshDb();
+  await grant(db);
+  const b = as(db, B);
+  assert.equal((await b(`select my_access()->>'role' r`))[0].r, "unclaimed");
+  assert.equal((await b(`select claim_gym() c`))[0].c, true);
+  assert.equal((await b(`select my_access()->>'role' r`))[0].r, "owner");
+  assert.equal((await as(db, A)(`select claim_gym() c`))[0].c, false);
+  await b(`insert into members (full_name, phone) values ('First', '9000000001')`);
+  assert.equal((await b(`select count(*)::int n from members`))[0].n, 1);
 });

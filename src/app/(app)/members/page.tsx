@@ -2,7 +2,8 @@ import Link from "next/link";
 import Form from "next/form";
 import { Plus, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings } from "@/lib/auth";
+import { getSettings, requireAccess } from "@/lib/auth";
+import { photoUrls } from "@/lib/photos";
 import { addDays, fmtDate, localDate, money, todayISO } from "@/lib/format";
 import { daysLeftText, membershipState } from "@/lib/member-state";
 import type { MemberOverview } from "@/lib/types";
@@ -30,6 +31,7 @@ export default async function MembersPage(props: PageProps<"/members">) {
   const page = Math.max(1, Number(sp.page) || 1);
 
   const settings = await getSettings();
+  const isOwner = (await requireAccess()).role === "owner";
   const today = todayISO(settings.timezone);
   const soon = addDays(today, settings.expiry_alert_days);
   const sb = await createClient();
@@ -73,6 +75,7 @@ export default async function MembersPage(props: PageProps<"/members">) {
     .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
 
   const members = (data ?? []) as MemberOverview[];
+  const photos = await photoUrls(sb, members.map((m) => m.photo_path));
   const total = count ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const qs = (p: Record<string, string | number>) =>
@@ -84,9 +87,11 @@ export default async function MembersPage(props: PageProps<"/members">) {
         title="Members"
         description={`${total} member${total === 1 ? "" : "s"}${filter !== "all" ? ` · ${FILTERS.find((f) => f.key === filter)?.label}` : ""}`}
         actions={
-          <Link href="/members/new" className="btn-primary">
-            <Plus size={16} /> New admission
-          </Link>
+          isOwner && (
+            <Link href="/members/new" className="btn-primary">
+              <Plus size={16} /> New admission
+            </Link>
+          )
         }
       />
 
@@ -109,7 +114,12 @@ export default async function MembersPage(props: PageProps<"/members">) {
               "No members match this view."
             ) : (
               <>
-                No members yet. <Link href="/members/new" className="text-brand underline">Add your first admission</Link>.
+                No members yet.{" "}
+                {isOwner && (
+                  <>
+                    <Link href="/members/new" className="text-brand underline">Add your first admission</Link>.
+                  </>
+                )}
               </>
             )}
           </Empty>
@@ -134,7 +144,7 @@ export default async function MembersPage(props: PageProps<"/members">) {
                     <tr key={m.id}>
                       <td>
                         <Link href={`/members/${m.id}`} className="flex items-center gap-3">
-                          <Avatar name={m.full_name} />
+                          <Avatar name={m.full_name} src={m.photo_path ? photos.get(m.photo_path) : null} />
                           <span>
                             <span className="block font-medium text-ink hover:text-brand">{m.full_name}</span>
                             <span className="text-xs text-muted">{m.member_code}</span>

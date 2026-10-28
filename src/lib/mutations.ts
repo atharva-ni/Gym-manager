@@ -1,7 +1,7 @@
 import "server-only";
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getOwner } from "@/lib/auth";
+import { getAccess } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { errorMessage, type Row } from "@/lib/form";
 import type { ActionState } from "@/lib/types";
@@ -14,6 +14,10 @@ function friendly(err: { message: string; code?: string }) {
     return "This record has payments or other data linked to it, so it can't be deleted. Cancel it or mark it inactive instead.";
   }
   if (err.code === "23514") return "Some values are out of the allowed range.";
+  if (err.code === "42501") {
+    // Our own permission errors carry a readable message; RLS rejections don't
+    return /row-level security/i.test(err.message) ? "Only the gym owner can do this." : err.message;
+  }
   if (err.code === "PGRST202" || err.code === "42883") {
     return "Database update needed: run the newest file in supabase/migrations in the Supabase SQL Editor, then try again.";
   }
@@ -21,12 +25,13 @@ function friendly(err: { message: string; code?: string }) {
 }
 
 /**
- * Runs a database mutation as the signed-in owner, converts errors to
+ * Runs a database mutation as the signed-in owner or staff (the database
+ * limits what staff can change), converts errors to
  * a user-facing message and revalidates the app on success.
  */
 export async function runMutation(fn: (sb: SupabaseClient) => PromiseLike<DbResult>): Promise<ActionState> {
   try {
-    if (!(await getOwner())) return { error: "Your session has expired. Please sign in again." };
+    if (!(await getAccess())) return { error: "Your session has expired. Please sign in again." };
     const sb = await createClient();
     const res = await fn(sb);
     if (res && res.error) return { error: friendly(res.error) };

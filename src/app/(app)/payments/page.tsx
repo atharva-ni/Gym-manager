@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { CalendarPlus, MessageCircle, Pencil, Plus, Trash2 } from "lucide-react";
+import { CalendarPlus, MessageCircle, Pencil, Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings } from "@/lib/auth";
+import { getSettings, requireAccess } from "@/lib/auth";
 import { addDays, fmtDate, money, todayISO } from "@/lib/format";
 import { daysLeftText } from "@/lib/member-state";
 import { label, PAYMENT_CATEGORIES, PAYMENT_METHODS } from "@/lib/constants";
@@ -9,12 +9,12 @@ import { getPendingFees, rangeParams } from "@/lib/queries";
 import { waLink } from "@/lib/whatsapp";
 import type { Payment, Plan, Refund } from "@/lib/types";
 import { Badge, Card, Empty, PageHeader, Stat, TableWrap, Tabs } from "@/components/ui";
-import { ActionButton, FormDialog } from "@/components/forms";
+import { FormDialog } from "@/components/forms";
+import { VoidButton } from "@/components/void-button";
 import { CollectFeeFields } from "@/components/collect-fee";
 import { BillFields } from "@/components/bill-fields";
 import { renewMembership } from "../members/actions";
 import { DateRangeFilter } from "@/components/date-range";
-import { deleteRecord } from "@/app/actions";
 import { collectPayment, updatePayment } from "./actions";
 import { PaymentEditFields } from "./payment-fields";
 
@@ -24,6 +24,7 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
   const sp = await props.searchParams;
   const tab = sp.tab === "dues" || sp.tab === "expiring" ? sp.tab : "collections";
   const settings = await getSettings();
+  const isOwner = (await requireAccess()).role === "owner";
   const { currency } = settings;
   const today = todayISO(settings.timezone);
   const { from, to } = rangeParams(sp, today);
@@ -137,22 +138,26 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
         description="Every payment belongs to a member and is applied to their membership or PT fee. Part payments leave a balance you can collect later."
         actions={
           <FormDialog title="Collect fee" trigger={<><Plus size={16} /> Collect fee</>} action={collectPayment} submitLabel="Save payment" successMessage="Payment saved">
-            <CollectFeeFields currency={currency} today={today} />
+            <CollectFeeFields currency={currency} today={today} canWaive={isOwner} />
           </FormDialog>
         }
       />
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat
-          label="Collected in range"
-          value={money(total, currency)}
-          hint={refundTotal > 0 ? `${money(gross, currency)} received, ${money(refundTotal, currency)} refunded` : `${payments.length} payments`}
-        />
-        <Stat
-          label={topMethod ? `Via ${label(topMethod[0])}` : "Top method"}
-          value={topMethod ? money(topMethod[1], currency) : "-"}
-          hint={topMethod && gross ? `${Math.round((topMethod[1] / gross) * 100)}% of collections` : undefined}
-        />
+        {isOwner && (
+          <>
+            <Stat
+              label="Collected in range"
+              value={money(total, currency)}
+              hint={refundTotal > 0 ? `${money(gross, currency)} received, ${money(refundTotal, currency)} refunded` : `${payments.length} payments`}
+            />
+            <Stat
+              label={topMethod ? `Via ${label(topMethod[0])}` : "Top method"}
+              value={topMethod ? money(topMethod[1], currency) : "-"}
+              hint={topMethod && gross ? `${Math.round((topMethod[1] / gross) * 100)}% of collections` : undefined}
+            />
+          </>
+        )}
         <Stat label="Pending dues" value={money(outstanding, currency)} hint={`${dueMemberIds.length} members`} tone="warn" href="/payments?tab=dues" />
         <Stat label="Overdue" value={overdue.length} hint="Past the promised date" tone={overdue.length ? "bad" : "neutral"} href="/payments?tab=dues" />
       </div>
@@ -220,38 +225,40 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
                                 <MessageCircle size={14} /> Remind
                               </a>
                             )}
-                            <FormDialog
-                              title={`${isPT ? "Renew PT" : "Renew"}: ${m.full_name}`}
-                              trigger={<><CalendarPlus size={14} /> Renew</>}
-                              triggerClass="btn-secondary btn-sm"
-                              action={renewMembership.bind(null, m.id)}
-                              submitLabel="Save bill"
-                              successMessage="Renewed"
-                              wide
-                            >
-                              {(isPT ? ptPlans.length && trainers.length : gymPlans.length) ? (
-                                <BillFields
-                                  ptOnly={isPT}
-                                  plans={isPT ? [] : gymPlans}
-                                  ptPlans={trainers.length ? ptPlans : []}
-                                  trainers={trainers}
-                                  currency={currency}
-                                  today={today}
-                                  startDate={startFrom}
-                                  ptStartDate={startFrom}
-                                  defaultTrainerId={m.trainer_id}
-                                  chargeAdmission={false}
-                                />
-                              ) : (
-                                <p className="text-sm text-muted">
-                                  {isPT ? "No active PT packages or trainers." : "No active membership plans."} Set them up on the{" "}
-                                  <Link href={isPT && ptPlans.length ? "/trainers" : "/plans"} className="text-brand underline">
-                                    {isPT && ptPlans.length ? "Staff" : "Plans"} page
-                                  </Link>
-                                  .
-                                </p>
-                              )}
-                            </FormDialog>
+                            {isOwner && (
+                              <FormDialog
+                                title={`${isPT ? "Renew PT" : "Renew"}: ${m.full_name}`}
+                                trigger={<><CalendarPlus size={14} /> Renew</>}
+                                triggerClass="btn-secondary btn-sm"
+                                action={renewMembership.bind(null, m.id)}
+                                submitLabel="Save bill"
+                                successMessage="Renewed"
+                                wide
+                              >
+                                {(isPT ? ptPlans.length && trainers.length : gymPlans.length) ? (
+                                  <BillFields
+                                    ptOnly={isPT}
+                                    plans={isPT ? [] : gymPlans}
+                                    ptPlans={trainers.length ? ptPlans : []}
+                                    trainers={trainers}
+                                    currency={currency}
+                                    today={today}
+                                    startDate={startFrom}
+                                    ptStartDate={startFrom}
+                                    defaultTrainerId={m.trainer_id}
+                                    chargeAdmission={false}
+                                  />
+                                ) : (
+                                  <p className="text-sm text-muted">
+                                    {isPT ? "No active PT packages or trainers." : "No active membership plans."} Set them up on the{" "}
+                                    <Link href={isPT && ptPlans.length ? "/trainers" : "/plans"} className="text-brand underline">
+                                      {isPT && ptPlans.length ? "Staff" : "Plans"} page
+                                    </Link>
+                                    .
+                                  </p>
+                                )}
+                              </FormDialog>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -329,6 +336,7 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
                                 defaultFeeId={f.id}
                                 currency={currency}
                                 today={today}
+                                canWaive={isOwner}
                               />
                             </FormDialog>
                           </div>
@@ -412,14 +420,14 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
                                   {e.r.refund_no}
                                 </Link>
                               )}
-                              <ActionButton
-                                action={deleteRecord.bind(null, "refunds", e.r.id)}
-                                confirmLabel="Delete refund"
-                                confirmText={`Delete this ${money(e.r.amount, currency)} refund record? Only do this if it was entered by mistake. A cancelled plan stays cancelled.`}
-                                successMessage="Refund deleted"
-                              >
-                                <Trash2 size={14} />
-                              </ActionButton>
+                              {isOwner && (
+                                <VoidButton
+                                  table="refunds"
+                                  id={e.r.id}
+                                  what={`${money(e.r.amount, currency)} refund`}
+                                  note="A cancelled plan stays cancelled."
+                                />
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -443,17 +451,19 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
                               <Link href={`/receipt/${e.p.receipt_no ?? e.p.id}`} target="_blank" className="btn-ghost btn-sm">
                                 Receipt
                               </Link>
-                              <FormDialog title="Edit payment" trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={updatePayment} successMessage="Payment updated">
-                                <PaymentEditFields payment={e.p} today={today} />
-                              </FormDialog>
-                              <ActionButton
-                                action={deleteRecord.bind(null, "payments", e.p.id)}
-                                confirmLabel="Delete payment"
-                                confirmText={`Delete this ${money(e.p.amount, currency)} payment from ${e.p.members?.full_name ?? "the member"}? Use this only for mistakes; for money given back, use Refund on the member's plan.`}
-                                successMessage="Payment deleted"
-                              >
-                                <Trash2 size={14} />
-                              </ActionButton>
+                              {isOwner && (
+                                <>
+                                  <FormDialog title="Edit payment" trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={updatePayment} successMessage="Payment updated">
+                                    <PaymentEditFields payment={e.p} today={today} />
+                                  </FormDialog>
+                                  <VoidButton
+                                    table="payments"
+                                    id={e.p.id}
+                                    what={`${money(e.p.amount, currency)} payment from ${e.p.members?.full_name ?? "the member"}`}
+                                    note="Its fee shows as due again. For money given back, use Refund on the member's plan instead."
+                                  />
+                                </>
+                              )}
                             </div>
                           </td>
                         </tr>

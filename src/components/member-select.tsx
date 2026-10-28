@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { searchMembers } from "@/app/actions";
 
-export type MemberOption = { id: string; member_code: string; full_name: string; phone: string | null };
+export type MemberOption = { id: string; member_code: string; full_name: string; phone: string | null; photo_url?: string | null };
 
 /**
  * Searchable member picker. Searches the database as you type (name, member
@@ -134,8 +134,14 @@ export function MemberSelect({
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => pick(m)}
                 >
-                  <span className="text-ink">{m.full_name}</span>
-                  <span className="text-xs text-muted">
+                  <span className="flex min-w-0 items-center gap-2">
+                    {m.photo_url && (
+                      // eslint-disable-next-line @next/next/no-img-element -- signed storage URL
+                      <img src={m.photo_url} alt="" className="size-8 shrink-0 rounded-full object-cover" />
+                    )}
+                    <span className="truncate text-ink">{m.full_name}</span>
+                  </span>
+                  <span className="shrink-0 text-xs text-muted">
                     {m.member_code}
                     {m.phone ? ` · ${m.phone}` : ""}
                   </span>

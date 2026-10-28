@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings } from "@/lib/auth";
+import { getSettings, requireOwner } from "@/lib/auth";
 import { todayISO } from "@/lib/format";
 import type { Plan } from "@/lib/types";
 import { Card, PageHeader } from "@/components/ui";
@@ -13,6 +13,7 @@ export const metadata = { title: "New admission · SetFit Fitness" };
 
 export default async function NewMemberPage(props: PageProps<"/members/new">) {
   const { lead: leadId } = await props.searchParams;
+  await requireOwner(); // staff are sent to check-in
   const settings = await getSettings();
   const today = todayISO(settings.timezone);
   const sb = await createClient();

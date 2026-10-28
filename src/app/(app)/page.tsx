@@ -4,7 +4,7 @@ import {
 } from "lucide-react";
 import { waLink } from "@/lib/whatsapp";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings } from "@/lib/auth";
+import { getSettings, requireOwner } from "@/lib/auth";
 import { addDays, addMonths, dayBoundsUTC, fmtClock, fmtDate, money, monthLabel, todayISO } from "@/lib/format";
 import { daysLeftText } from "@/lib/member-state";
 import { label } from "@/lib/constants";
@@ -38,6 +38,7 @@ type DashStats = {
 };
 
 export default async function DashboardPage() {
+  await requireOwner(); // staff are sent to check-in
   const settings = await getSettings();
   const { currency, timezone } = settings;
   const today = todayISO(timezone);

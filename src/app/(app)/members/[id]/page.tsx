@@ -6,7 +6,8 @@ import {
   Send, Trash2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings } from "@/lib/auth";
+import { getSettings, requireAccess } from "@/lib/auth";
+import { photoUrls } from "@/lib/photos";
 import { addDays, age, dayBoundsUTC, fmtDate, fmtDateTime, insideSince, money, monthStart, todayISO } from "@/lib/format";
 import { daysLeftText, isFrozen, membershipState } from "@/lib/member-state";
 import { refundSuggestion } from "@/lib/billing";
@@ -17,6 +18,7 @@ import type { Attendance, Freeze, Measurement, MemberOverview, MembershipBalance
 import { siteUrl } from "@/lib/site";
 import { Avatar, Badge, Card, Empty, Stat, StatusBadge, TableWrap, Tabs } from "@/components/ui";
 import { ActionButton, FormDialog, ViewDialog } from "@/components/forms";
+import { VoidButton } from "@/components/void-button";
 import { MemberSelect } from "@/components/member-select";
 import { Checkbox, Field, Grid, Hidden, SelectField, TextArea } from "@/components/fields";
 import { TrendLine } from "@/components/charts";
@@ -44,6 +46,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
   const tab = typeof sp.tab === "string" && TABS.some((t) => t.key === sp.tab) ? sp.tab : "memberships";
 
   const settings = await getSettings();
+  const isOwner = (await requireAccess()).role === "owner";
   const { currency, timezone } = settings;
   const today = todayISO(timezone);
   const sb = await createClient();
@@ -51,6 +54,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
   const { data: memberRow } = await sb.from("member_overview").select("*").eq("id", id).maybeSingle();
   if (!memberRow) notFound();
   const m = memberRow as MemberOverview;
+  const photoUrl = (await photoUrls(sb, [m.photo_path])).get(m.photo_path ?? "") ?? null;
 
   const monthBounds = dayBoundsUTC(monthStart(today), timezone, today);
   const [msRes, payRes, attRes, measRes, plansRes, trainersRes, visitsRes, fees, frzRes, refRes, sesRes, site] = await Promise.all([
@@ -114,7 +118,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
 
   const collectDialog = (trigger: ReactNode, triggerClass: string) => (
     <FormDialog title="Collect fee" trigger={trigger} triggerClass={triggerClass} action={collectPayment} submitLabel="Save payment" successMessage="Payment saved">
-      <CollectFeeFields memberId={m.id} fees={fees} currency={currency} today={today} />
+      <CollectFeeFields memberId={m.id} fees={fees} currency={currency} today={today} canWaive={isOwner} />
     </FormDialog>
   );
 
@@ -140,7 +144,13 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-4">
-          <Avatar name={m.full_name} size="lg" />
+          {photoUrl ? (
+            <a href={photoUrl} target="_blank" rel="noreferrer" title="Open photo">
+              <Avatar name={m.full_name} size="lg" src={photoUrl} />
+            </a>
+          ) : (
+            <Avatar name={m.full_name} size="lg" />
+          )}
           <div className="min-w-0">
             <h1 className="truncate text-2xl font-semibold tracking-tight">{m.full_name}</h1>
             <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted">
@@ -161,66 +171,70 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
               <LogIn size={16} /> Check in
             </ActionButton>
           )}
-          <FormDialog
-            title="Add personal training"
-            trigger={<><Dumbbell size={16} /> Add PT</>}
-            triggerClass="btn-secondary"
-            action={renewMembership.bind(null, m.id)}
-            submitLabel="Save PT bill"
-            successMessage="Personal training added"
-            wide
-          >
-            {ptPlans.length && trainers.length ? (
-              <BillFields
-                ptOnly
-                plans={[]}
-                ptPlans={ptPlans}
-                trainers={trainers}
-                currency={currency}
-                today={today}
-                startDate={today}
-                ptStartDate={ptFrom}
-                defaultTrainerId={m.trainer_id}
-              />
-            ) : (
-              <p className="text-sm text-muted">
-                {ptPlans.length ? (
-                  <>Add a trainer on the <Link href="/trainers" className="text-brand underline">Staff page</Link> first.</>
-                ) : (
-                  <>Create a personal training package on the <Link href="/plans" className="text-brand underline">Plans page</Link> first (e.g. 12 sessions in 30 days).</>
-                )}
-              </p>
-            )}
-          </FormDialog>
-          <FormDialog
-            title="Renew / add plan"
-            trigger={<><CalendarPlus size={16} /> Renew / add plan</>}
-            action={renewMembership.bind(null, m.id)}
-            submitLabel="Save bill"
-            successMessage="Bill saved"
-            wide
-          >
-            {gymPlans.length || ptPlans.length ? (
-              <BillFields
-                plans={gymPlans}
-                ptPlans={trainers.length ? ptPlans : []}
-                trainers={trainers}
-                currency={currency}
-                today={today}
-                startDate={renewFrom}
-                ptStartDate={ptFrom}
-                defaultTrainerId={m.trainer_id}
-                chargeAdmission={isNewMember}
-              />
-            ) : (
-              <p className="text-sm text-muted">
-                Create a plan first on the <Link href="/plans" className="text-brand underline">Plans page</Link>.
-              </p>
-            )}
-          </FormDialog>
-          <FormDialog title="Edit member" trigger={<Pencil size={16} />} triggerClass="btn-secondary" action={updateMember} successMessage="Member updated" wide>
-            <MemberFields member={m} trainers={trainers} today={today} />
-          </FormDialog>
+          {isOwner && (
+            <>
+            <FormDialog
+              title="Add personal training"
+              trigger={<><Dumbbell size={16} /> Add PT</>}
+              triggerClass="btn-secondary"
+              action={renewMembership.bind(null, m.id)}
+              submitLabel="Save PT bill"
+              successMessage="Personal training added"
+              wide
+            >
+              {ptPlans.length && trainers.length ? (
+                <BillFields
+                  ptOnly
+                  plans={[]}
+                  ptPlans={ptPlans}
+                  trainers={trainers}
+                  currency={currency}
+                  today={today}
+                  startDate={today}
+                  ptStartDate={ptFrom}
+                  defaultTrainerId={m.trainer_id}
+                />
+              ) : (
+                <p className="text-sm text-muted">
+                  {ptPlans.length ? (
+                    <>Add a trainer on the <Link href="/trainers" className="text-brand underline">Staff page</Link> first.</>
+                  ) : (
+                    <>Create a personal training package on the <Link href="/plans" className="text-brand underline">Plans page</Link> first (e.g. 12 sessions in 30 days).</>
+                  )}
+                </p>
+              )}
+            </FormDialog>
+            <FormDialog
+              title="Renew / add plan"
+              trigger={<><CalendarPlus size={16} /> Renew / add plan</>}
+              action={renewMembership.bind(null, m.id)}
+              submitLabel="Save bill"
+              successMessage="Bill saved"
+              wide
+            >
+              {gymPlans.length || ptPlans.length ? (
+                <BillFields
+                  plans={gymPlans}
+                  ptPlans={trainers.length ? ptPlans : []}
+                  trainers={trainers}
+                  currency={currency}
+                  today={today}
+                  startDate={renewFrom}
+                  ptStartDate={ptFrom}
+                  defaultTrainerId={m.trainer_id}
+                  chargeAdmission={isNewMember}
+                />
+              ) : (
+                <p className="text-sm text-muted">
+                  Create a plan first on the <Link href="/plans" className="text-brand underline">Plans page</Link>.
+                </p>
+              )}
+            </FormDialog>
+            <FormDialog title="Edit member" trigger={<Pencil size={16} />} triggerClass="btn-secondary" action={updateMember} successMessage="Member updated" wide>
+              <MemberFields member={m} trainers={trainers} today={today} photoUrl={photoUrl} />
+            </FormDialog>
+            </>
+          )}
         </div>
       </div>
 
@@ -231,14 +245,16 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
             <span className="font-semibold">Marked as frozen</span> (set by hand, with no freeze dates). Unfreeze to make the membership active
             again, or use Freeze on the plan below to pause it with dates.
           </span>
-          <ActionButton
-            action={unfreezeMember.bind(null, m.id)}
-            className="btn-secondary btn-sm"
-            confirmLabel="Unfreeze"
-            confirmText={`Mark ${m.full_name} and their plans as active again?`}
-          >
-            <Play size={14} /> Unfreeze
-          </ActionButton>
+          {isOwner && (
+            <ActionButton
+              action={unfreezeMember.bind(null, m.id)}
+              className="btn-secondary btn-sm"
+              confirmLabel="Unfreeze"
+              confirmText={`Mark ${m.full_name} and their plans as active again?`}
+            >
+              <Play size={14} /> Unfreeze
+            </ActionButton>
+          )}
         </div>
       )}
       {isFrozen(m, today) && (
@@ -247,7 +263,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
             <span className="font-semibold">Membership frozen</span> until {fmtDate(m.freeze_end)}. It resumes automatically; the end date has
             been moved out by the freeze length.
           </span>
-          {currentFreeze && (
+          {currentFreeze && isOwner && (
             <ActionButton
               action={unfreezeMembership.bind(null, currentFreeze.id)}
               className="btn-secondary btn-sm"
@@ -332,17 +348,19 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
             </div>
           )}
           {m.notes && <p className="mt-4 whitespace-pre-line text-sm text-ink-2">{m.notes}</p>}
-          <div className="mt-5 border-t border-line pt-4">
-            <ActionButton
-              action={deleteMember.bind(null, m.id)}
-              className="btn-danger btn-sm"
-              confirmLabel="Delete member"
-              confirmText={`Permanently delete ${m.full_name}? This only works if they have no payments. Otherwise edit them and set Status to Inactive.`}
-              title="Delete member"
-            >
-              <Trash2 size={14} /> Delete member
-            </ActionButton>
-          </div>
+          {isOwner && (
+            <div className="mt-5 border-t border-line pt-4">
+              <ActionButton
+                action={deleteMember.bind(null, m.id)}
+                className="btn-danger btn-sm"
+                confirmLabel="Delete member"
+                confirmText={`Permanently delete ${m.full_name}? This only works if they have no payments. Otherwise edit them and set Status to Inactive.`}
+                title="Delete member"
+              >
+                <Trash2 size={14} /> Delete member
+              </ActionButton>
+            </div>
+          )}
         </Card>
 
         <div className="min-w-0 lg:col-span-2">
@@ -372,7 +390,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                     const net = Number(x.price) - Number(x.discount);
                     const owes = Number(x.balance) > 0;
                     const sessionsLeft = x.sessions_total ? x.sessions_total - x.sessions_used : null;
-                    const canLog = isPT && s === "active" && (sessionsLeft === null || sessionsLeft > 0);
+                    const canLog = isOwner && isPT && s === "active" && (sessionsLeft === null || sessionsLeft > 0);
                     return (
                       <li key={x.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0 space-y-1">
@@ -392,7 +410,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                                 Sessions <span className="font-medium text-ink">{x.sessions_used}</span>
                                 {x.sessions_total ? ` of ${x.sessions_total}` : ""}
                               </span>
-                              {x.sessions_used > 0 && s === "active" && (
+                              {isOwner && x.sessions_used > 0 && s === "active" && (
                                 <ActionButton action={logSession.bind(null, x.id, -1)} className="btn-ghost btn-sm px-1.5" title="Undo last session">
                                   <Minus size={12} />
                                 </ActionButton>
@@ -440,7 +458,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                                 <span className="text-muted">
                                   {fmtDate(f.start_date)} to {fmtDate(f.end_date)} ({f.days}d){f.reason ? ` · ${f.reason}` : ""}
                                 </span>
-                                {live && (
+                                {live && isOwner && (
                                   <ActionButton
                                     action={unfreezeMembership.bind(null, f.id)}
                                     className="btn-ghost btn-sm px-1.5"
@@ -473,171 +491,173 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                           {owes && x.balance_due_on && (
                             <p className={`text-xs ${x.balance_due_on < today ? "text-bad" : "text-muted"}`}>by {fmtDate(x.balance_due_on)}</p>
                           )}
-                          <div className="flex flex-wrap gap-1 sm:justify-end">
-                            {s !== "cancelled" && x.end_date >= today && x.kind !== "pass" && !isCharge && !freezesOf(x.id).some((f) => f.end_date >= today) && (
-                              <FormDialog
-                                title={isPT ? "Freeze PT package" : "Freeze membership"}
-                                trigger={<><Pause size={12} /> Freeze</>}
-                                triggerClass="btn-ghost btn-sm"
-                                action={freezeMembership}
-                                submitLabel="Freeze"
-                              >
-                                <Hidden name="id" value={x.id} />
-                                <p className="text-sm text-muted">
-                                  The plan is paused for the freeze length and its end date ({fmtDate(x.end_date)}) moves out by the same number of days.
-                                  It resumes automatically, or use Resume now to end it early.
-                                  {settings.freeze_max_days
-                                    ? ` Limit: ${settings.freeze_max_days} days per plan (${freezesOf(x.id).reduce((a, f) => a + f.days, 0)} used).`
-                                    : ""}
-                                  {Number(settings.freeze_fee) > 0 ? ` A freeze fee of ${money(settings.freeze_fee, currency)} is added to dues.` : ""}
-                                </p>
-                                <Grid cols={3}>
-                                  <Field label="Freeze from" name="start_date" type="date" min={today} max={x.end_date} defaultValue={today} required />
-                                  <Field label="Days" name="days" type="number" min={1} max={365} defaultValue={15} required />
-                                  <Field label="Reason" name="reason" placeholder="Travel, injury, exams" />
-                                </Grid>
-                              </FormDialog>
-                            )}
-                            {s === "active" &&
-                              ((x.kind === "membership" && gymPlans.length > 0) || (isPT && ptPlans.length > 0 && trainers.length > 0)) && (
-                              <FormDialog
-                                title={`Change plan: ${x.plan_name}`}
-                                trigger="Change plan"
-                                triggerClass="btn-ghost btn-sm"
-                                action={changePlan.bind(null, x.id)}
-                                submitLabel="Change plan"
-                                successMessage="Plan changed"
-                                wide
-                              >
-                                <BillFields
-                                  ptOnly={isPT}
-                                  plans={isPT ? [] : gymPlans.filter((p) => p.id !== x.plan_id)}
-                                  ptPlans={isPT ? ptPlans.filter((p) => p.id !== x.plan_id) : []}
-                                  trainers={trainers}
-                                  currency={currency}
-                                  today={today}
-                                  startDate={today > x.start_date ? today : x.start_date}
-                                  ptStartDate={today > x.start_date ? today : x.start_date}
-                                  defaultTrainerId={x.trainer_id}
-                                  chargeAdmission={false}
-                                  changeFrom={{ ...x, freezes: freezesOf(x.id) }}
-                                />
-                              </FormDialog>
-                            )}
-                            {(x.kind === "membership" || isPT) && s !== "cancelled" && s !== "expired" && (
-                              <FormDialog
-                                title={`Transfer: ${x.plan_name}`}
-                                trigger="Transfer"
-                                triggerClass="btn-ghost btn-sm"
-                                action={transferMembership.bind(null, x.id)}
-                                submitLabel="Transfer"
-                              >
-                                <p className="text-sm text-muted">
-                                  Moves this {isPT ? "PT package" : "membership"} (with its remaining days, freezes and pending balance) to another member.
-                                  Payments already made stay on {m.full_name}&apos;s history.
-                                </p>
-                                <MemberSelect name="to_member_id" label="Transfer to" required />
-                                <Grid>
-                                  <Field label="Transfer fee" name="fee" type="number" step="0.01" min={0} defaultValue={0} hint="Added to the new member's dues." />
-                                  <Field label="Note" name="note" placeholder="Moving to another city" />
-                                </Grid>
-                              </FormDialog>
-                            )}
-                            {(Number(x.paid) > 0 || s !== "cancelled") && (
-                              <FormDialog
-                                title={`Refund / cancel: ${x.plan_name}`}
-                                trigger="Refund"
-                                triggerClass="btn-ghost btn-sm"
-                                action={refundMembership}
-                                submitLabel="Save"
-                              >
-                                <Hidden name="id" value={x.id} />
-                                <p className="text-sm text-muted">
-                                  Paid {money(x.paid, currency)} on this plan{Number(x.refunded) > 0 ? ` (after ${money(x.refunded, currency)} already refunded)` : ""}. The
-                                  suggested refund is the paid share of the unused days.
-                                </p>
-                                <Grid>
-                                  <Field
-                                    label="Refund amount"
-                                    name="amount"
-                                    type="number"
-                                    step="0.01"
-                                    min={0}
-                                    max={Number(x.paid)}
-                                    defaultValue={refundSuggestion(x, today)}
-                                    hint="Use 0 to cancel without a refund."
+                          {isOwner && (
+                            <div className="flex flex-wrap gap-1 sm:justify-end">
+                              {s !== "cancelled" && x.end_date >= today && x.kind !== "pass" && !isCharge && !freezesOf(x.id).some((f) => f.end_date >= today) && (
+                                <FormDialog
+                                  title={isPT ? "Freeze PT package" : "Freeze membership"}
+                                  trigger={<><Pause size={12} /> Freeze</>}
+                                  triggerClass="btn-ghost btn-sm"
+                                  action={freezeMembership}
+                                  submitLabel="Freeze"
+                                >
+                                  <Hidden name="id" value={x.id} />
+                                  <p className="text-sm text-muted">
+                                    The plan is paused for the freeze length and its end date ({fmtDate(x.end_date)}) moves out by the same number of days.
+                                    It resumes automatically, or use Resume now to end it early.
+                                    {settings.freeze_max_days
+                                      ? ` Limit: ${settings.freeze_max_days} days per plan (${freezesOf(x.id).reduce((a, f) => a + f.days, 0)} used).`
+                                      : ""}
+                                    {Number(settings.freeze_fee) > 0 ? ` A freeze fee of ${money(settings.freeze_fee, currency)} is added to dues.` : ""}
+                                  </p>
+                                  <Grid cols={3}>
+                                    <Field label="Freeze from" name="start_date" type="date" min={today} max={x.end_date} defaultValue={today} required />
+                                    <Field label="Days" name="days" type="number" min={1} max={365} defaultValue={15} required />
+                                    <Field label="Reason" name="reason" placeholder="Travel, injury, exams" />
+                                  </Grid>
+                                </FormDialog>
+                              )}
+                              {s === "active" &&
+                                ((x.kind === "membership" && gymPlans.length > 0) || (isPT && ptPlans.length > 0 && trainers.length > 0)) && (
+                                <FormDialog
+                                  title={`Change plan: ${x.plan_name}`}
+                                  trigger="Change plan"
+                                  triggerClass="btn-ghost btn-sm"
+                                  action={changePlan.bind(null, x.id)}
+                                  submitLabel="Change plan"
+                                  successMessage="Plan changed"
+                                  wide
+                                >
+                                  <BillFields
+                                    ptOnly={isPT}
+                                    plans={isPT ? [] : gymPlans.filter((p) => p.id !== x.plan_id)}
+                                    ptPlans={isPT ? ptPlans.filter((p) => p.id !== x.plan_id) : []}
+                                    trainers={trainers}
+                                    currency={currency}
+                                    today={today}
+                                    startDate={today > x.start_date ? today : x.start_date}
+                                    ptStartDate={today > x.start_date ? today : x.start_date}
+                                    defaultTrainerId={x.trainer_id}
+                                    chargeAdmission={false}
+                                    changeFrom={{ ...x, freezes: freezesOf(x.id) }}
                                   />
-                                  <SelectField label="Refund mode" name="method" defaultValue="upi" options={options(PAYMENT_METHODS)} />
-                                  <Field label="Date" name="refunded_on" type="date" max={today} defaultValue={today} required />
-                                  <Field label="Reason" name="reason" placeholder="Moving city, medical, unhappy" />
-                                </Grid>
-                                {s !== "cancelled" && <Checkbox label="Cancel this plan (stops it and clears any pending balance)" name="cancel" defaultChecked />}
-                                {s !== "cancelled" && (
-                                  <p className="text-xs text-muted">If you don&apos;t cancel, the plan continues and its fee is lowered by the refund amount.</p>
-                                )}
-                              </FormDialog>
-                            )}
-                            {!isCharge && (
-                            <FormDialog
-                              title={isPT ? "Extend PT package" : "Extend membership"}
-                              trigger="Extend"
-                              triggerClass="btn-ghost btn-sm"
-                              action={extendMembership}
-                              submitLabel="Extend"
-                              successMessage="End date extended"
-                            >
-                              <Hidden name="id" value={x.id} />
-                              <p className="text-sm text-muted">
-                                Adds days to the end date ({fmtDate(x.end_date)}), e.g. for a freeze, holiday or compensation.
-                              </p>
-                              <Grid>
-                                <Field label="Days to add" name="days" type="number" min={1} defaultValue={7} required />
-                                <Field label="Reason" name="reason" placeholder="Freeze: travel" />
-                              </Grid>
-                            </FormDialog>
-                            )}
-                            <FormDialog title={isPT ? "Edit PT package" : "Edit membership"} trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={updateMembership}>
-                              <Hidden name="id" value={x.id} />
-                              <Hidden name="kind" value={x.kind} />
-                              <Grid>
-                                <Field label="Start date" name="start_date" type="date" defaultValue={x.start_date} required />
-                                <Field label="End date" name="end_date" type="date" defaultValue={x.end_date} required />
-                                <Field label="Fee before discount" name="price" type="number" step="0.01" min={0} defaultValue={x.price} required />
-                                <Field label="Discount" name="discount" type="number" step="0.01" min={0} defaultValue={x.discount} />
-                                <Field label="Balance due by" name="balance_due_on" type="date" defaultValue={x.balance_due_on ?? ""} />
-                                <SelectField
-                                  label="Status"
-                                  name="status"
-                                  defaultValue={x.status}
-                                  options={[
-                                    { value: "active", label: "Active" },
-                                    ...(x.status === "frozen" ? [{ value: "frozen", label: "Frozen (old)" }] : []),
-                                    { value: "cancelled", label: "Cancelled" },
-                                  ]}
-                                />
-                                {isPT && (
-                                  <>
-                                    <SelectField
-                                      label="Trainer"
-                                      name="trainer_id"
-                                      defaultValue={x.trainer_id}
-                                      options={allTrainers.map((t) => ({ value: t.id, label: t.full_name }))}
+                                </FormDialog>
+                              )}
+                              {(x.kind === "membership" || isPT) && s !== "cancelled" && s !== "expired" && (
+                                <FormDialog
+                                  title={`Transfer: ${x.plan_name}`}
+                                  trigger="Transfer"
+                                  triggerClass="btn-ghost btn-sm"
+                                  action={transferMembership.bind(null, x.id)}
+                                  submitLabel="Transfer"
+                                >
+                                  <p className="text-sm text-muted">
+                                    Moves this {isPT ? "PT package" : "membership"} (with its remaining days, freezes and pending balance) to another member.
+                                    Payments already made stay on {m.full_name}&apos;s history.
+                                  </p>
+                                  <MemberSelect name="to_member_id" label="Transfer to" required />
+                                  <Grid>
+                                    <Field label="Transfer fee" name="fee" type="number" step="0.01" min={0} defaultValue={0} hint="Added to the new member's dues." />
+                                    <Field label="Note" name="note" placeholder="Moving to another city" />
+                                  </Grid>
+                                </FormDialog>
+                              )}
+                              {(Number(x.paid) > 0 || s !== "cancelled") && (
+                                <FormDialog
+                                  title={`Refund / cancel: ${x.plan_name}`}
+                                  trigger="Refund"
+                                  triggerClass="btn-ghost btn-sm"
+                                  action={refundMembership}
+                                  submitLabel="Save"
+                                >
+                                  <Hidden name="id" value={x.id} />
+                                  <p className="text-sm text-muted">
+                                    Paid {money(x.paid, currency)} on this plan{Number(x.refunded) > 0 ? ` (after ${money(x.refunded, currency)} already refunded)` : ""}. The
+                                    suggested refund is the paid share of the unused days.
+                                  </p>
+                                  <Grid>
+                                    <Field
+                                      label="Refund amount"
+                                      name="amount"
+                                      type="number"
+                                      step="0.01"
+                                      min={0}
+                                      max={Number(x.paid)}
+                                      defaultValue={refundSuggestion(x, today)}
+                                      hint="Use 0 to cancel without a refund."
                                     />
-                                    <Field label="Sessions in package" name="sessions_total" type="number" min={1} defaultValue={x.sessions_total ?? ""} />
-                                  </>
-                                )}
-                              </Grid>
-                              <TextArea label="Notes" name="notes" rows={2} defaultValue={x.notes} />
-                            </FormDialog>
-                            <ActionButton
-                              action={deleteRecord.bind(null, "memberships", x.id)}
-                              confirmLabel={isPT ? "Delete PT package" : "Delete membership"}
-                              confirmText="This only works if no payments were made against it. Otherwise edit it and set Status to Cancelled."
-                              successMessage="Deleted"
-                            >
-                              <Trash2 size={14} />
-                            </ActionButton>
-                          </div>
+                                    <SelectField label="Refund mode" name="method" defaultValue="upi" options={options(PAYMENT_METHODS)} />
+                                    <Field label="Date" name="refunded_on" type="date" max={today} defaultValue={today} required />
+                                    <Field label="Reason" name="reason" placeholder="Moving city, medical, unhappy" />
+                                  </Grid>
+                                  {s !== "cancelled" && <Checkbox label="Cancel this plan (stops it and clears any pending balance)" name="cancel" defaultChecked />}
+                                  {s !== "cancelled" && (
+                                    <p className="text-xs text-muted">If you don&apos;t cancel, the plan continues and its fee is lowered by the refund amount.</p>
+                                  )}
+                                </FormDialog>
+                              )}
+                              {!isCharge && (
+                              <FormDialog
+                                title={isPT ? "Extend PT package" : "Extend membership"}
+                                trigger="Extend"
+                                triggerClass="btn-ghost btn-sm"
+                                action={extendMembership}
+                                submitLabel="Extend"
+                                successMessage="End date extended"
+                              >
+                                <Hidden name="id" value={x.id} />
+                                <p className="text-sm text-muted">
+                                  Adds days to the end date ({fmtDate(x.end_date)}), e.g. for a freeze, holiday or compensation.
+                                </p>
+                                <Grid>
+                                  <Field label="Days to add" name="days" type="number" min={1} defaultValue={7} required />
+                                  <Field label="Reason" name="reason" placeholder="Freeze: travel" />
+                                </Grid>
+                              </FormDialog>
+                              )}
+                              <FormDialog title={isPT ? "Edit PT package" : "Edit membership"} trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={updateMembership}>
+                                <Hidden name="id" value={x.id} />
+                                <Hidden name="kind" value={x.kind} />
+                                <Grid>
+                                  <Field label="Start date" name="start_date" type="date" defaultValue={x.start_date} required />
+                                  <Field label="End date" name="end_date" type="date" defaultValue={x.end_date} required />
+                                  <Field label="Fee before discount" name="price" type="number" step="0.01" min={0} defaultValue={x.price} required />
+                                  <Field label="Discount" name="discount" type="number" step="0.01" min={0} defaultValue={x.discount} />
+                                  <Field label="Balance due by" name="balance_due_on" type="date" defaultValue={x.balance_due_on ?? ""} />
+                                  <SelectField
+                                    label="Status"
+                                    name="status"
+                                    defaultValue={x.status}
+                                    options={[
+                                      { value: "active", label: "Active" },
+                                      ...(x.status === "frozen" ? [{ value: "frozen", label: "Frozen (old)" }] : []),
+                                      { value: "cancelled", label: "Cancelled" },
+                                    ]}
+                                  />
+                                  {isPT && (
+                                    <>
+                                      <SelectField
+                                        label="Trainer"
+                                        name="trainer_id"
+                                        defaultValue={x.trainer_id}
+                                        options={allTrainers.map((t) => ({ value: t.id, label: t.full_name }))}
+                                      />
+                                      <Field label="Sessions in package" name="sessions_total" type="number" min={1} defaultValue={x.sessions_total ?? ""} />
+                                    </>
+                                  )}
+                                </Grid>
+                                <TextArea label="Notes" name="notes" rows={2} defaultValue={x.notes} />
+                              </FormDialog>
+                              <ActionButton
+                                action={deleteRecord.bind(null, "memberships", x.id)}
+                                confirmLabel={isPT ? "Delete PT package" : "Delete membership"}
+                                confirmText="This only works if no payments were made against it. Otherwise edit it and set Status to Cancelled."
+                                successMessage="Deleted"
+                              >
+                                <Trash2 size={14} />
+                              </ActionButton>
+                            </div>
+                          )}
                         </div>
                       </li>
                     );
@@ -713,14 +733,14 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                                   <Send size={14} />
                                 </a>
                               )}
-                              <ActionButton
-                                action={deleteRecord.bind(null, "payments", h.p.id)}
-                                confirmLabel="Delete payment"
-                                confirmText={`Delete this ${money(h.p.amount, currency)} payment? The amount will show as due again.`}
-                                successMessage="Payment deleted"
-                              >
-                                <Trash2 size={14} />
-                              </ActionButton>
+                              {isOwner && (
+                                <VoidButton
+                                  table="payments"
+                                  id={h.p.id}
+                                  what={`${money(h.p.amount, currency)} payment`}
+                                  note="The amount shows as due again."
+                                />
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -771,24 +791,26 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
               <Card
                 title="Body weight"
                 action={
-                  <FormDialog
-                    title="Add measurement"
-                    trigger={<><Ruler size={14} /> Add measurement</>}
-                    triggerClass="btn-secondary btn-sm"
-                    action={saveMeasurement.bind(null, m.id)}
-                    successMessage="Measurement saved"
-                  >
-                    <Field label="Date" name="measured_on" type="date" defaultValue={today} max={today} required />
-                    <Grid cols={3}>
-                      <Field label="Weight (kg)" name="weight_kg" type="number" step="0.1" min={0} />
-                      <Field label="Height (cm)" name="height_cm" type="number" step="0.1" min={0} />
-                      <Field label="Body fat %" name="body_fat_pct" type="number" step="0.1" min={0} max={100} />
-                      <Field label="Chest (cm)" name="chest_cm" type="number" step="0.1" min={0} />
-                      <Field label="Waist (cm)" name="waist_cm" type="number" step="0.1" min={0} />
-                      <Field label="Arms (cm)" name="arms_cm" type="number" step="0.1" min={0} />
-                    </Grid>
-                    <TextArea label="Notes" name="notes" rows={2} />
-                  </FormDialog>
+                  isOwner && (
+                    <FormDialog
+                      title="Add measurement"
+                      trigger={<><Ruler size={14} /> Add measurement</>}
+                      triggerClass="btn-secondary btn-sm"
+                      action={saveMeasurement.bind(null, m.id)}
+                      successMessage="Measurement saved"
+                    >
+                      <Field label="Date" name="measured_on" type="date" defaultValue={today} max={today} required />
+                      <Grid cols={3}>
+                        <Field label="Weight (kg)" name="weight_kg" type="number" step="0.1" min={0} />
+                        <Field label="Height (cm)" name="height_cm" type="number" step="0.1" min={0} />
+                        <Field label="Body fat %" name="body_fat_pct" type="number" step="0.1" min={0} max={100} />
+                        <Field label="Chest (cm)" name="chest_cm" type="number" step="0.1" min={0} />
+                        <Field label="Waist (cm)" name="waist_cm" type="number" step="0.1" min={0} />
+                        <Field label="Arms (cm)" name="arms_cm" type="number" step="0.1" min={0} />
+                      </Grid>
+                      <TextArea label="Notes" name="notes" rows={2} />
+                    </FormDialog>
+                  )
                 }
               >
                 {measurements.filter((x) => x.weight_kg).length >= 2 ? (
@@ -833,14 +855,16 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                               <td className="num">{x.waist_cm ?? "-"}</td>
                               <td className="num">{x.arms_cm ?? "-"}</td>
                               <td>
-                                <ActionButton
-                                  action={deleteRecord.bind(null, "measurements", x.id)}
-                                  confirmLabel="Delete measurement"
-                                  confirmText={`Delete the measurement from ${fmtDate(x.measured_on)}?`}
-                                  successMessage="Deleted"
-                                >
-                                  <Trash2 size={14} />
-                                </ActionButton>
+                                {isOwner && (
+                                  <ActionButton
+                                    action={deleteRecord.bind(null, "measurements", x.id)}
+                                    confirmLabel="Delete measurement"
+                                    confirmText={`Delete the measurement from ${fmtDate(x.measured_on)}?`}
+                                    successMessage="Deleted"
+                                  >
+                                    <Trash2 size={14} />
+                                  </ActionButton>
+                                )}
                               </td>
                             </tr>
                           );

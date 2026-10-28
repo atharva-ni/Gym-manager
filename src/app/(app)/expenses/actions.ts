@@ -2,7 +2,8 @@
 
 import { FormError, parseForm } from "@/lib/form";
 import { runMutation, saveRow } from "@/lib/mutations";
-import { getOwner, getSettings } from "@/lib/auth";
+import { getAccess, getSettings } from "@/lib/auth";
+import { removeFiles } from "@/lib/photos";
 import { todayISO } from "@/lib/format";
 import type { ActionState } from "@/lib/types";
 
@@ -11,7 +12,7 @@ const BILL_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "appl
 
 /** Save an expense, with an optional photo / PDF of the bill (private storage). */
 export async function saveExpense(_: ActionState, fd: FormData): Promise<ActionState> {
-  const owner = await getOwner();
+  const access = await getAccess();
   return runMutation(async (sb) => {
     const row = parseForm(fd, {
       category: "text!",
@@ -26,7 +27,7 @@ export async function saveExpense(_: ActionState, fd: FormData): Promise<ActionS
       if (file.size > MAX_BILL_BYTES) throw new FormError("Bill photo must be under 5 MB");
       if (!BILL_TYPES.includes(file.type)) throw new FormError("Bill must be a photo (JPG, PNG, WebP, HEIC) or a PDF");
       const ext = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
-      const path = `${owner!.id}/${crypto.randomUUID()}.${ext}`;
+      const path = `${access!.gymId}/${crypto.randomUUID()}.${ext}`;
       const up = await sb.storage.from("bills").upload(path, file, { contentType: file.type });
       if (up.error) {
         throw new FormError(
@@ -35,7 +36,12 @@ export async function saveExpense(_: ActionState, fd: FormData): Promise<ActionS
       }
       row.bill_path = path;
     }
-    return saveRow(sb, "expenses", fd.get("id"), row);
+    // A new bill replaces the old one: remove the old file once the save worked
+    const id = fd.get("id");
+    const old = id && row.bill_path ? (await sb.from("expenses").select("bill_path").eq("id", String(id)).single()).data : null;
+    const saved = await saveRow(sb, "expenses", id, row);
+    if (!saved.error && old?.bill_path) await removeFiles(sb, "bills", [old.bill_path]);
+    return saved;
   });
 }
 

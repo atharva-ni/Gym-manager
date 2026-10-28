@@ -1,6 +1,6 @@
 import { FileText, Pencil, Plus, Repeat, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings } from "@/lib/auth";
+import { getSettings, requireOwner } from "@/lib/auth";
 import { fmtDate, money, todayISO } from "@/lib/format";
 import { EXPENSE_CATEGORIES, label, options, PAYMENT_METHODS } from "@/lib/constants";
 import { rangeParams } from "@/lib/queries";
@@ -68,6 +68,7 @@ function RecurringFields({ r, trainers }: { r?: RecurringExpense; trainers: { id
 
 export default async function ExpensesPage(props: PageProps<"/expenses">) {
   const sp = await props.searchParams;
+  await requireOwner(); // staff are sent to check-in
   const settings = await getSettings();
   const { currency } = settings;
   const today = todayISO(settings.timezone);

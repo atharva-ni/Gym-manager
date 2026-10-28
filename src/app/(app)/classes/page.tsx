@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Check, ChevronLeft, ChevronRight, Pencil, Plus, Trash2, Users, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings } from "@/lib/auth";
+import { getSettings, requireOwner } from "@/lib/auth";
 import { addDays, fmtClock, fmtDate, todayISO } from "@/lib/format";
 import { DAYS } from "@/lib/constants";
 import type { ClassBooking, GymClass } from "@/lib/types";
@@ -48,6 +48,7 @@ function ClassFields({ c, trainers, day }: { c?: GymClass; trainers: { id: strin
 
 export default async function ClassesPage(props: PageProps<"/classes">) {
   const { week } = await props.searchParams;
+  await requireOwner(); // staff are sent to check-in
   const settings = await getSettings();
   const today = todayISO(settings.timezone);
   const todayDow = new Date(`${today}T12:00:00Z`).getUTCDay();

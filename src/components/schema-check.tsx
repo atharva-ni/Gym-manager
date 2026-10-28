@@ -5,18 +5,20 @@ import { createClient } from "@/lib/supabase/server";
  * supabase/migrations hasn't been run yet), instead of failing silently.
  */
 export async function SchemaCheck() {
-  // In production, migrations are already run; skip the 4 extra database queries on every page request.
+  // In production, migrations are already run; skip the extra database queries on every page request.
   if (process.env.NODE_ENV === "production" && process.env.CHECK_SCHEMA !== "true") {
     return null;
   }
   const sb = await createClient();
-  const [ms, pay, v4, v6] = await Promise.all([
+  const [ms, pay, v4, v6, v8, v9] = await Promise.all([
     sb.from("memberships").select("kind, balance_due_on, sessions_used").limit(1),
     sb.from("payments").select("receipt_no").limit(1),
     sb.from("refunds").select("id").limit(1),
     sb.from("pt_sessions").select("id").limit(1),
+    sb.from("members").select("photo_path").limit(1),
+    sb.from("activity_log").select("id").limit(1),
   ]);
-  const error = ms.error ?? pay.error ?? v4.error ?? v6.error;
+  const error = ms.error ?? pay.error ?? v4.error ?? v6.error ?? v8.error ?? v9.error;
   if (!error) return null;
   const pending = ms.error
     ? "002_payments_and_pt.sql, then 003_receipts.sql, then 004_freeze_refunds_passes.sql"
@@ -24,7 +26,11 @@ export async function SchemaCheck() {
       ? "003_receipts.sql, then 004_freeze_refunds_passes.sql"
       : v4.error
         ? "004_freeze_refunds_passes.sql, then 005_unfreeze_status.sql, then 006_operations.sql"
-        : "006_operations.sql (after 005_unfreeze_status.sql)";
+        : v6.error
+          ? "006_operations.sql (after 005_unfreeze_status.sql)"
+          : v8.error
+            ? "007_performance_optimization.sql, then 008_member_photos.sql, then 009_staff_and_activity.sql"
+            : "009_staff_and_activity.sql (after 008_member_photos.sql)";
 
   const missingTable = error.code === "42P01" || /relation .* does not exist/i.test(error.message);
   return (

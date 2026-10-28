@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Pencil, Plus, Trash2, UserCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings } from "@/lib/auth";
+import { getSettings, requireOwner } from "@/lib/auth";
 import { fmtDate, localDate, todayISO } from "@/lib/format";
 import { label, LEAD_SOURCES, LEAD_STATUSES, options } from "@/lib/constants";
 import type { Lead } from "@/lib/types";
@@ -38,6 +38,7 @@ function LeadFields({ l, today }: { l?: Lead; today: string }) {
 export default async function LeadsPage(props: PageProps<"/leads">) {
   const sp = await props.searchParams;
   const view = typeof sp.view === "string" ? sp.view : "open";
+  await requireOwner(); // staff are sent to check-in
   const settings = await getSettings();
   const today = todayISO(settings.timezone);
   const sb = await createClient();

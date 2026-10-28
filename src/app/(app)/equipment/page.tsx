@@ -1,6 +1,6 @@
 import { History, Pencil, Plus, Trash2, Wrench } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings } from "@/lib/auth";
+import { getSettings, requireOwner } from "@/lib/auth";
 import { addDays, fmtDate, money, todayISO } from "@/lib/format";
 import { EQUIPMENT_CATEGORIES, EQUIPMENT_STATUSES, label, options } from "@/lib/constants";
 import type { Equipment, EquipmentService } from "@/lib/types";
@@ -34,6 +34,7 @@ function EquipmentFields({ e }: { e?: Equipment }) {
 }
 
 export default async function EquipmentPage() {
+  await requireOwner(); // staff are sent to check-in
   const settings = await getSettings();
   const today = todayISO(settings.timezone);
   const soon = addDays(today, 7);

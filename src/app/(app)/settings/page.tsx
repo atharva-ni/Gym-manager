@@ -1,11 +1,12 @@
-import { Download } from "lucide-react";
-import { getOwner, getSettings } from "@/lib/auth";
+import { Download, UserPlus } from "lucide-react";
+import { getSettings, requireOwner } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
 import { CURRENCIES } from "@/lib/constants";
-import { Card, PageHeader } from "@/components/ui";
-import { ActionForm, SubmitButton } from "@/components/forms";
+import { Badge, Card, PageHeader } from "@/components/ui";
+import { ActionButton, ActionForm, FormDialog, SubmitButton } from "@/components/forms";
 import { Field, Grid, SelectField, TextArea } from "@/components/fields";
 import { PasswordField } from "@/components/password-field";
-import { changeLoginEmail, changePassword, saveSettings } from "./actions";
+import { addStaff, changeLoginEmail, changePassword, saveSettings, setStaffActive } from "./actions";
 
 export const metadata = { title: "Settings · SetFit Fitness" };
 
@@ -22,9 +23,14 @@ const EXPORTS = [
   { table: "leads", label: "Leads" },
 ];
 
+type StaffAccount = { id: string; full_name: string; email: string; active: boolean; user_id: string | null };
+
 export default async function SettingsPage() {
+  const { user: owner } = await requireOwner();
   const s = await getSettings();
-  const owner = await getOwner();
+  const sb = await createClient();
+  const { data: staffRows } = await sb.from("staff_accounts").select("id, full_name, email, active, user_id").order("created_at");
+  const staff = (staffRows ?? []) as StaffAccount[];
   const zones = Intl.supportedValuesOf("timeZone");
   const currencies = CURRENCIES.includes(s.currency) ? CURRENCIES : [s.currency, ...CURRENCIES];
 
@@ -90,11 +96,61 @@ export default async function SettingsPage() {
                 You sign in with <span className="font-medium text-ink">{owner?.email}</span>.
               </p>
               <Field label="New login email" name="email" type="email" autoComplete="email" required />
-              <p className="text-xs text-muted">
-                Add the new address to <code>OWNER_EMAILS</code> first. A confirmation link is emailed; the change applies after you click it.
-              </p>
+              <p className="text-xs text-muted">A confirmation link is emailed; the change applies after you click it.</p>
               <SubmitButton className="btn-secondary w-full">Change login email</SubmitButton>
             </ActionForm>
+          </Card>
+          <Card
+            title="Staff logins"
+            action={
+              <FormDialog
+                title="Add staff login"
+                trigger={
+                  <>
+                    <UserPlus size={14} /> Add
+                  </>
+                }
+                triggerClass="btn-secondary btn-sm"
+                action={addStaff}
+                submitLabel="Create login"
+                successMessage="Staff login created"
+              >
+                <Field label="Name" name="full_name" autoComplete="off" required />
+                <Field label="Email" name="email" type="email" autoComplete="off" required />
+                <PasswordField label="Temporary password" name="password" autoComplete="new-password" minLength={8} />
+                <p className="text-xs text-muted">
+                  Give them the email and temporary password; they can change it under My account. Staff can check members in,
+                  view members and collect fees. They can&apos;t see reports, expenses or salaries, or change and delete records.
+                </p>
+              </FormDialog>
+            }
+          >
+            {staff.length === 0 ? (
+              <p className="text-sm text-muted">No staff logins yet. Add one for each front-desk person, so the activity log shows who did what.</p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {staff.map((st) => (
+                  <li key={st.id} className="flex items-center justify-between gap-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-ink">{st.full_name}</p>
+                      <p className="truncate text-xs text-muted">{st.email}</p>
+                      <div className="mt-1">
+                        {!st.active ? <Badge tone="neutral">Switched off</Badge> : st.user_id ? <Badge tone="good">Active</Badge> : <Badge tone="warn">Not signed in yet</Badge>}
+                      </div>
+                    </div>
+                    <ActionButton
+                      action={setStaffActive.bind(null, st.id, !st.active)}
+                      className="btn-secondary btn-sm shrink-0"
+                      confirmText={st.active ? `Switch off ${st.full_name}'s login? They lose access straight away.` : undefined}
+                      confirmLabel="Switch off"
+                      successMessage={st.active ? "Login switched off" : "Login switched on"}
+                    >
+                      {st.active ? "Switch off" : "Switch on"}
+                    </ActionButton>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
           <Card title="Change password">
             <ActionForm action={changePassword} successMessage="Password updated." resetOnSuccess>
