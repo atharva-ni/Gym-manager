@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test tests/billing.test.ts tests/db.test.mjs",
+    "test": "node --test tests/billing.test.ts tests/plans.test.ts tests/db.test.mjs",
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {

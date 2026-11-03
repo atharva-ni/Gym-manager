@@ -2,7 +2,9 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getAccess } from "@/lib/auth";
+import { getAccess, getSettings } from "@/lib/auth";
+import { dayBoundsUTC, todayISO } from "@/lib/format";
+import { membershipState, type MembershipState } from "@/lib/member-state";
 import { runMutation } from "@/lib/mutations";
 import { photoUrls, removeFiles } from "@/lib/photos";
 import { phoneDigits } from "@/lib/billing";
@@ -18,11 +20,16 @@ const DELETABLE = new Set([
   "classes", "expenses", "products", "equipment", "leads", "recurring_expenses",
 ]);
 
-/** Owner only. Expenses take their bill photo with them. */
+/** Owner only. Expenses take their bill photo with them; staff members' logins are switched off. */
 export async function deleteRecord(table: string, id: string): Promise<ActionState> {
   if (!DELETABLE.has(table)) return { error: "Not allowed" };
   if ((await getAccess())?.role !== "owner") return { error: "Only the gym owner can delete records." };
   return runMutation(async (sb) => {
+    if (table === "trainers") {
+      // A deleted staff member can't keep using their app login
+      const off = await sb.from("staff_accounts").update({ active: false }).eq("trainer_id", id);
+      if (off.error) return off;
+    }
     if (table !== "expenses") return sb.from(table).delete().eq("id", id);
     const { data, error } = await sb.from("expenses").delete().eq("id", id).select("bill_path");
     if (error) return { error };
@@ -79,4 +86,50 @@ export async function membersWithPhone(phone: string, excludeId?: string): Promi
   if (excludeId) q = q.neq("id", excludeId);
   const { data } = await q;
   return data ?? [];
+}
+
+export type MemberStatus = {
+  id: string;
+  full_name: string;
+  member_code: string;
+  phone: string | null;
+  photo_url: string | null;
+  plan_name: string | null;
+  membership_end: string | null;
+  freeze_end: string | null;
+  state: MembershipState;
+  balance_due: number;
+  /** Already checked in today and not checked out. */
+  inside: boolean;
+};
+
+/** Who is at the desk: photo, plan, expiry and dues, shown before checking in. */
+export async function memberStatus(id: string): Promise<MemberStatus | null> {
+  if (!id || !(await getAccess())) return null;
+  const settings = await getSettings();
+  const today = todayISO(settings.timezone);
+  const sb = await createClient();
+  const [{ data: m }, { data: open }] = await Promise.all([
+    sb
+      .from("member_overview")
+      .select("id, full_name, member_code, phone, photo_path, status, plan_name, membership_end, membership_status, freeze_start, freeze_end, balance_due")
+      .eq("id", id)
+      .maybeSingle(),
+    sb.from("attendance").select("id").eq("member_id", id).is("check_out", null).gte("check_in", dayBoundsUTC(today, settings.timezone).start).limit(1),
+  ]);
+  if (!m) return null;
+  const photo = m.photo_path ? (await photoUrls(sb, [m.photo_path])).get(m.photo_path) : null;
+  return {
+    id: m.id,
+    full_name: m.full_name,
+    member_code: m.member_code,
+    phone: m.phone,
+    photo_url: photo ?? null,
+    plan_name: m.plan_name,
+    membership_end: m.membership_end,
+    freeze_end: m.freeze_end,
+    state: membershipState(m, today, settings.expiry_alert_days),
+    balance_due: Number(m.balance_due ?? 0),
+    inside: !!open?.length,
+  };
 }

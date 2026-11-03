@@ -4,16 +4,24 @@ import { getSettings } from "@/lib/auth";
 import { FormError, parseForm } from "@/lib/form";
 import { money } from "@/lib/format";
 import { runMutation } from "@/lib/mutations";
-import { allocatePayments, r2, type ModeSplit } from "@/lib/billing";
+import { allocateAcrossFees, allocatePayments, r2, type ModeSplit } from "@/lib/billing";
 import type { ActionState, MembershipBalance } from "@/lib/types";
 
 const EPS = 0.005;
+
+/** Payment category for a fee: PT, admission, other charges, or membership. */
+function categoryOf(ms: Pick<MembershipBalance, "kind" | "plan_name">) {
+  if (ms.kind === "personal_training") return "personal_training";
+  if (ms.kind === "charge") return ms.plan_name === "Admission fee" ? "admission" : "other";
+  return "membership";
+}
 
 /**
  * Collect money from a member. Fee payments go to one membership / PT
  * package: the one picked, or else the member's oldest unpaid fee. An
  * optional discount / waive-off reduces what is owed, the amount can be split
  * across two payment modes, and paying more than the balance is refused.
+ * "All pending fees" spreads one payment over every fee, oldest first.
  * Everything is saved in one transaction (collect_fee) with one receipt.
  */
 export async function collectPayment(_: ActionState, fd: FormData): Promise<ActionState> {
@@ -50,6 +58,39 @@ export async function collectPayment(_: ActionState, fd: FormData): Promise<Acti
       ];
     }
     const base = { member_id: f.member_id, paid_on: f.paid_on, reference: f.reference, notes: f.notes };
+
+    // Every pending fee, oldest first, on one receipt
+    if (fd.get("pay_all") === "1") {
+      const { data, error } = await sb
+        .from("membership_balances")
+        .select("*")
+        .eq("member_id", f.member_id as string)
+        .neq("status", "cancelled")
+        .gt("balance", 0)
+        .order("start_date");
+      if (error) return { error };
+      const list = (data ?? []) as MembershipBalance[];
+      const owed = r2(list.reduce((s, x) => s + Number(x.balance), 0));
+      if (!list.length) throw new FormError("This member has no pending fees.");
+      if (amount <= 0) throw new FormError("Enter the amount being paid.");
+      if (amount > owed + EPS) throw new FormError(`Amount is more than the ${money(owed, currency)} owed in total.`);
+      const parts = allocateAcrossFees(amount, list.map((x) => Number(x.balance)));
+      const rows = allocatePayments(parts, modes)
+        .filter((p) => p.amount > 0)
+        .map((p) => ({ ...base, membership_id: list[p.line].id, amount: p.amount, method: p.method, category: categoryOf(list[p.line]) }));
+      // The fee left part-paid gets the new due date
+      const partial = list.find((x, i) => parts[i] > 0 && parts[i] < Number(x.balance) - EPS);
+      const rpc = await sb.rpc("collect_fee", {
+        p_membership_id: partial?.id ?? null,
+        p_waive: 0,
+        p_waive_note: null,
+        p_due_on: partial ? (f.next_due_on ?? partial.balance_due_on) : null,
+        p_rows: rows,
+      });
+      if (rpc.error) return { error: rpc.error };
+      out.receipt = rpc.data as string | null;
+      return;
+    }
 
     // Not tied to a plan: admission, single PT session, misc.
     if (!f.membership_id && f.category !== "membership") {
@@ -92,7 +133,7 @@ export async function collectPayment(_: ActionState, fd: FormData): Promise<Acti
             membership_id: ms.id,
             amount: p.amount,
             method: p.method,
-            category: ms.kind === "personal_training" ? "personal_training" : ms.kind === "charge" ? "other" : "membership",
+            category: categoryOf(ms),
           }))
         : [];
     const rpc = await sb.rpc("collect_fee", {

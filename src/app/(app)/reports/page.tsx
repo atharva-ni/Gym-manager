@@ -91,7 +91,7 @@ export default async function ReportsPage(props: PageProps<"/reports">) {
     <>
       <PageHeader title="Reports" description={`${fmtDate(from)} - ${fmtDate(to)}`} />
 
-      <div className="mb-2 flex flex-wrap gap-2">
+      <div className="mb-3 flex flex-wrap gap-2">
         {PRESETS(today).map((p) => (
           <Link key={p.label} href={`/reports?from=${p.from}&to=${p.to}`} className={`btn-sm ${p.from === from && p.to === to ? "btn-primary" : "btn-secondary"}`}>
             {p.label}
@@ -119,7 +119,7 @@ export default async function ReportsPage(props: PageProps<"/reports">) {
         <Stat
           label="Net profit"
           value={money(profit, currency)}
-          hint={revenue ? `${Math.round((profit / revenue) * 100)}% margin` : undefined}
+          hint={expenses > 0 && revenue ? `${Math.round((profit / revenue) * 100)}% margin` : "No expenses in range"}
           tone={profit >= 0 ? "good" : "bad"}
         />
       </div>
@@ -160,7 +160,7 @@ export default async function ReportsPage(props: PageProps<"/reports">) {
         )}
       </Card>
 
-      <div className="mb-6 grid gap-6 lg:grid-cols-3">
+      <div className="mb-6 grid gap-6 lg:grid-cols-3 lg:items-start">
         <Card title="Revenue by payment method">
           {byMethod.length ? <SimpleBarChart data={byMethod} name="Revenue" format="money" currency={currency} horizontal height={Math.max(150, byMethod.length * 36)} /> : <Empty>No revenue.</Empty>}
         </Card>
@@ -180,7 +180,7 @@ export default async function ReportsPage(props: PageProps<"/reports">) {
         <Stat label="Lapsed (not renewed)" value={lapsed.count ?? 0} hint="Latest plan ended in range" tone="warn" href="/members?filter=expired" />
         <Stat label="Avg. membership value" value={money(planRows.reduce((s, p) => s + Number(p.revenue), 0) / Math.max(1, planRows.reduce((s, p) => s + Number(p.sold), 0)), currency)} />
       </div>
-      <div className="mb-6 grid gap-6 lg:grid-cols-2">
+      <div className="mb-6 grid gap-6 lg:grid-cols-2 lg:items-start">
         <Card title="New members per month">
           {joinedRows.length ? <SimpleBarChart data={joinedRows} name="New members" /> : <Empty>No data.</Empty>}
         </Card>
@@ -221,17 +221,23 @@ export default async function ReportsPage(props: PageProps<"/reports">) {
       <h2 className="mb-3 mt-8 text-lg font-semibold">Attendance</h2>
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
         <Stat label="Total visits" value={totalVisits} />
-        <Stat label="Avg. visits per day" value={(totalVisits / Math.max(1, spanDays)).toFixed(1)} />
+        <Stat label="Avg. visits per day" value={totalVisits ? (totalVisits / Math.max(1, spanDays)).toFixed(1) : "-"} hint={totalVisits ? undefined : "No visits yet"} />
         <Stat label="Busiest day" value={totalVisits ? dowData.reduce((a, b) => (b.value > a.value ? b : a)).label : "-"} />
       </div>
-      <div className="mb-6 grid gap-6 lg:grid-cols-2">
-        <Card title="Visits by weekday">
-          {totalVisits ? <SimpleBarChart data={dowData} name="Visits" /> : <Empty>No visits.</Empty>}
+      {totalVisits ? (
+        <div className="mb-6 grid gap-6 lg:grid-cols-2">
+          <Card title="Visits by weekday">
+            <SimpleBarChart data={dowData} name="Visits" />
+          </Card>
+          <Card title="Visits by hour of day">
+            {hourData.length ? <SimpleBarChart data={hourData} name="Visits" /> : <Empty>No visits.</Empty>}
+          </Card>
+        </div>
+      ) : (
+        <Card className="mb-6">
+          <Empty>No visits in this period. Check-ins from the Attendance page show up here.</Empty>
         </Card>
-        <Card title="Visits by hour of day">
-          {hourData.length ? <SimpleBarChart data={hourData} name="Visits" /> : <Empty>No visits.</Empty>}
-        </Card>
-      </div>
+      )}
 
       {/* POS */}
       <h2 className="mb-3 mt-8 text-lg font-semibold">Product sales</h2>

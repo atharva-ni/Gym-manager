@@ -109,10 +109,13 @@ export default async function ClassesPage(props: PageProps<"/classes">) {
               className={d === todayDow ? "border-brand/60" : ""}
               bodyClass="space-y-2 p-3"
               title={
-                <span className="flex items-center gap-2">
-                  {DAYS[d]}
-                  <span className="text-xs font-normal text-muted">{fmtDate(dateOf(d)).replace(/ \d{4}$/, "")}</span>
-                  {dateOf(d) === today && <span className="rounded bg-brand-soft px-1.5 text-[10px] font-semibold uppercase text-brand">Today</span>}
+                // Day on top, date (+ Today) underneath: same shape in every column
+                <span className="block whitespace-nowrap">
+                  <span className="block">{DAYS[d]}</span>
+                  <span className="flex items-center gap-1.5 text-xs font-normal text-muted">
+                    {fmtDate(dateOf(d)).replace(/ \d{4}$/, "")}
+                    {dateOf(d) === today && <span className="rounded bg-brand-soft px-1.5 text-[10px] font-semibold uppercase text-brand">Today</span>}
+                  </span>
                 </span>
               }
             >

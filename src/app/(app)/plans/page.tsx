@@ -1,60 +1,42 @@
-import { Dumbbell, Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings, requireOwner } from "@/lib/auth";
-import { money, todayISO } from "@/lib/format";
+import { money, priceTag, todayISO } from "@/lib/format";
+import { durationLabel, groupPlans, perMonth, savingPct, type PlanGroup } from "@/lib/plans";
 import type { Plan, PlanKind } from "@/lib/types";
-import { Badge, Card, Empty, PageHeader, TableWrap } from "@/components/ui";
+import { Badge, Card, Empty, PageHeader } from "@/components/ui";
 import { ActionButton, FormDialog } from "@/components/forms";
-import { Checkbox, Field, Grid, Hidden, SelectField, TextArea } from "@/components/fields";
-import { deleteRecord } from "@/app/actions";
-import { savePlan } from "./actions";
+import { Field } from "@/components/fields";
+import { deletePlanGroup, saveAdmissionFee, savePlanGroup } from "./actions";
+import { PlanGroupFields } from "./plan-group-fields";
 
 export const metadata = { title: "Plans · SetFit Fitness" };
 
-function PlanFields({ plan, kind }: { plan?: Plan; kind: PlanKind }) {
-  const isPT = kind === "personal_training";
-  return (
-    <>
-      <Hidden name="id" value={plan?.id} />
-      <SelectField
-        label="Type"
-        name="kind"
-        defaultValue={plan?.kind ?? kind}
-        options={[
-          { value: "membership", label: "Gym membership" },
-          { value: "personal_training", label: "Personal training package" },
-          { value: "pass", label: "Day pass / trial" },
-        ]}
-      />
-      <Field
-        label="Plan name"
-        name="name"
-        defaultValue={plan?.name}
-        placeholder={isPT ? "e.g. PT 12 sessions / month" : kind === "pass" ? "e.g. Day pass, 3-day trial" : "e.g. Monthly"}
-        required
-      />
-      <Grid cols={3}>
-        <Field label="Duration (days)" name="duration_days" type="number" min={1} defaultValue={plan?.duration_days ?? (kind === "pass" ? 1 : 30)} required />
-        <Field label="Price" name="price" type="number" step="0.01" min={0} defaultValue={plan?.price} required />
-        <Field label="Admission fee" name="admission_fee" type="number" step="0.01" min={0} defaultValue={plan?.admission_fee ?? 0} />
-      </Grid>
-      <Field
-        label="Sessions included (PT only)"
-        name="sessions"
-        type="number"
-        min={1}
-        defaultValue={plan?.sessions ?? (isPT ? 12 : "")}
-        hint="Leave empty for unlimited. Ignored for gym memberships."
-      />
-      <TextArea label="Description / inclusions" name="description" defaultValue={plan?.description} />
-      <Checkbox label="Available for new sign-ups" name="is_active" defaultChecked={plan?.is_active ?? true} />
-    </>
-  );
-}
+const SECTIONS: { kind: PlanKind; title: string; noun: string; empty: string }[] = [
+  {
+    kind: "membership",
+    title: "Gym memberships",
+    noun: "plan",
+    empty: "No plans yet. Create one (e.g. Silver: 1, 3, 6 and 12 months) to start taking admissions.",
+  },
+  {
+    kind: "personal_training",
+    title: "Personal training packages",
+    noun: "PT package",
+    empty: "No PT packages yet. Add one (e.g. 12 sessions a month, for 1 or 3 months) to sell personal training.",
+  },
+  {
+    kind: "pass",
+    title: "Day passes & trials",
+    noun: "pass",
+    empty: "No passes yet. Add one (e.g. Day pass, 1 day, ₹200) to sell walk-in visits from the Attendance page.",
+  },
+];
 
 export default async function PlansPage() {
   await requireOwner(); // staff are sent to check-in
   const settings = await getSettings();
+  const { currency } = settings;
   const sb = await createClient();
   const today = todayISO(settings.timezone);
 
@@ -62,89 +44,76 @@ export default async function PlansPage() {
     sb.from("plans").select("*").order("price"),
     sb.from("memberships").select("plan_id").eq("status", "active").gte("end_date", today),
   ]);
+  const counts: Record<string, number> = {};
+  for (const m of active ?? []) if (m.plan_id) counts[m.plan_id] = (counts[m.plan_id] ?? 0) + 1;
+  const groups = groupPlans((plans ?? []) as Plan[]);
 
-  const counts = new Map<string, number>();
-  for (const m of active ?? []) if (m.plan_id) counts.set(m.plan_id, (counts.get(m.plan_id) ?? 0) + 1);
-  const all = (plans ?? []) as Plan[];
-
-  const section = (kind: PlanKind) => {
-    const list = all.filter((p) => (p.kind ?? "membership") === kind);
-    const isPT = kind === "personal_training";
-    const isPass = kind === "pass";
+  const groupCard = (g: PlanGroup<Plan>, noun: string) => {
+    const members = g.options.reduce((s, o) => s + (counts[o.id] ?? 0), 0);
+    const isPT = g.kind === "personal_training";
     return (
-      <Card
-        title={isPT ? "Personal training packages" : isPass ? "Day passes & trials" : "Gym memberships"}
-        bodyClass=""
-        className="mb-6"
-        action={
-          <FormDialog
-            title={isPT ? "New PT package" : isPass ? "New day pass / trial" : "New membership plan"}
-            trigger={<><Plus size={14} /> {isPT ? "PT package" : isPass ? "Pass" : "Plan"}</>}
-            triggerClass="btn-secondary btn-sm"
-            action={savePlan}
-          >
-            <PlanFields kind={kind} />
-          </FormDialog>
-        }
-      >
-        {!list.length ? (
-          <Empty>
-            {isPass
-              ? "No passes yet. Add one (e.g. Day pass, 1 day, ₹200) to sell walk-in visits from the Attendance page."
-              : isPT
-              ? "No PT packages yet. Add one (e.g. 12 sessions in 30 days) to sell personal training."
-              : "No plans yet. Create your first membership plan to start enrolling members."}
-          </Empty>
-        ) : (
-          <TableWrap>
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>{isPT ? "Package" : "Plan"}</th>
-                  <th>Duration</th>
-                  {isPT && <th className="num">Sessions</th>}
-                  <th className="num">Price</th>
-                  {!isPT && !isPass && <th className="num">Admission</th>}
-                  <th className="num">{isPT ? "Active clients" : isPass ? "Active now" : "Active members"}</th>
-                  <th>Status</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {list.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      <p className="font-medium text-ink">{p.name}</p>
-                      {p.description && <p className="text-xs text-muted line-clamp-1">{p.description}</p>}
-                    </td>
-                    <td>{p.duration_days} days</td>
-                    {isPT && <td className="num">{p.sessions ?? "Unlimited"}</td>}
-                    <td className="num">{money(p.price, settings.currency)}</td>
-                    {!isPT && !isPass && <td className="num">{money(p.admission_fee, settings.currency)}</td>}
-                    <td className="num">{counts.get(p.id) ?? 0}</td>
-                    <td>{p.is_active ? <Badge tone="good">Active</Badge> : <Badge>Archived</Badge>}</td>
-                    <td>
-                      <div className="flex justify-end gap-1">
-                        <FormDialog title="Edit plan" trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={savePlan}>
-                          <PlanFields plan={p} kind={kind} />
-                        </FormDialog>
-                        <ActionButton
-                          action={deleteRecord.bind(null, "plans", p.id)}
-                          confirmLabel="Delete plan"
-                          confirmText={`Delete "${p.name}"? Existing memberships keep their details. To stop selling it but keep it on record, edit it and untick "Available for new sign-ups".`}
-                          successMessage="Plan deleted"
-                        >
-                          <Trash2 size={14} />
-                        </ActionButton>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </TableWrap>
-        )}
-      </Card>
+      <li key={g.name} className="p-4 sm:p-5">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="flex flex-wrap items-center gap-2 font-semibold text-ink">
+              {g.name}
+              {!g.active && <Badge>Not on sale</Badge>}
+            </p>
+            {g.description && <p className="text-sm text-muted">{g.description}</p>}
+            <p className="mt-0.5 text-xs text-muted">
+              {members} active {isPT ? "client" : "member"}
+              {members === 1 ? "" : "s"}
+            </p>
+          </div>
+          <div className="flex gap-1">
+            <FormDialog
+              title={`Edit ${g.name}`}
+              trigger={
+                <>
+                  <Pencil size={14} /> Edit
+                </>
+              }
+              triggerClass="btn-secondary btn-sm"
+              action={savePlanGroup}
+              successMessage="Plan saved"
+            >
+              <PlanGroupFields kind={g.kind} group={g} activeCounts={counts} />
+            </FormDialog>
+            <ActionButton
+              action={deletePlanGroup.bind(null, g.kind, g.name)}
+              confirmLabel={`Delete ${noun}`}
+              confirmText={`Delete "${g.name}"? Durations already sold are kept on record (and switched off); members keep their plan details.`}
+              successMessage="Removed"
+            >
+              <Trash2 size={14} />
+              <span className="sm:sr-only">Delete</span>
+            </ActionButton>
+          </div>
+        </div>
+        <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+          {g.options.map((o) => {
+            const pm = perMonth(o);
+            const save = savingPct(o, g.options);
+            return (
+              <li
+                key={o.id}
+                className={`rounded-lg border p-3 ${o.is_active ? "border-line bg-surface" : "border-dashed border-line bg-surface-2 text-muted"}`}
+              >
+                <p className="text-xs font-medium uppercase tracking-wide text-muted">{durationLabel(o)}</p>
+                <p className={`text-lg font-semibold tabular-nums ${o.is_active ? "text-ink" : ""}`}>{priceTag(o.price, currency)}</p>
+                <p className="text-xs text-muted">
+                  {isPT && <>{o.sessions ? `${o.sessions} sessions` : "Unlimited sessions"} · </>}
+                  {pm && o.duration_months !== 1 ? `${priceTag(pm, currency)}/mo` : null}
+                  {save ? <span className="text-good"> · save {save}%</span> : null}
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  {o.is_active ? `${counts[o.id] ?? 0} active` : "Not on sale"}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+      </li>
     );
   };
 
@@ -152,15 +121,73 @@ export default async function PlansPage() {
     <>
       <PageHeader
         title="Plans & packages"
-        description={
-          <span className="inline-flex items-center gap-1">
-            Gym memberships and <Dumbbell size={14} /> personal training packages. Prices are copied onto each sale, so editing a plan never changes past bills.
-          </span>
-        }
+        description="Each plan has its durations and prices. Gym and PT plans run in calendar months; editing a price never changes past bills."
       />
-      {section("membership")}
-      {section("personal_training")}
-      {section("pass")}
+      <Card className="mb-6" bodyClass="flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5">
+        <div>
+          <p className="font-semibold text-ink">Admission fee</p>
+          <p className="text-sm text-muted">
+            {Number(settings.admission_fee) > 0 ? (
+              <>
+                <span className="font-medium text-ink">{money(settings.admission_fee, currency)}</span>, charged once on a new admission, whatever the plan.
+                Shown as its own line on the bill and never refunded.
+              </>
+            ) : (
+              "No admission fee. Set one to charge it once on every new admission."
+            )}
+          </p>
+        </div>
+        <FormDialog
+          title="Admission fee"
+          trigger={
+            <>
+              <Pencil size={14} /> Edit
+            </>
+          }
+          triggerClass="btn-secondary btn-sm"
+          action={saveAdmissionFee}
+          successMessage="Admission fee saved"
+        >
+          <Field
+            label="Admission fee"
+            name="admission_fee"
+            type="number"
+            step="0.01"
+            min={0}
+            defaultValue={Number(settings.admission_fee ?? 0)}
+            hint="One-time fee on a new admission. 0 = none. You can still untick it on any bill."
+            required
+          />
+        </FormDialog>
+      </Card>
+      {SECTIONS.map((s) => {
+        const list = groups.filter((g) => g.kind === s.kind);
+        return (
+          <Card
+            key={s.kind}
+            title={s.title}
+            bodyClass=""
+            className="mb-6"
+            action={
+              <FormDialog
+                title={`New ${s.noun}`}
+                trigger={
+                  <>
+                    <Plus size={14} /> {s.noun[0].toUpperCase() + s.noun.slice(1)}
+                  </>
+                }
+                triggerClass="btn-secondary btn-sm"
+                action={savePlanGroup}
+                successMessage="Plan saved"
+              >
+                <PlanGroupFields kind={s.kind} />
+              </FormDialog>
+            }
+          >
+            {list.length ? <ul className="divide-y divide-line">{list.map((g) => groupCard(g, s.noun))}</ul> : <Empty>{s.empty}</Empty>}
+          </Card>
+        );
+      })}
     </>
   );
 }

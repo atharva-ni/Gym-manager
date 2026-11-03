@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { SchemaCheck } from "@/components/schema-check";
 import { getSettings, requireAccess } from "@/lib/auth";
+import { logoUrlFor } from "@/lib/brand";
 import { signOut } from "@/app/actions";
 
 // The session is read inside Suspense boundaries (here and in each page's
@@ -16,7 +17,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
       </Suspense>
       <main className="lg:pl-64">
         {/* Bottom padding keeps content clear of the phone tab bar */}
-        <div className="mx-auto max-w-7xl px-4 pt-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:px-6 sm:pt-6 lg:px-8 lg:py-8">
+        <div className="mx-auto max-w-[1400px] px-4 pt-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:px-6 sm:pt-6 lg:px-8 lg:py-8">
           <Suspense>
             <SchemaCheck />
           </Suspense>
@@ -30,5 +31,13 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
 async function SessionSidebar() {
   const { user, role, name } = await requireAccess();
   const settings = await getSettings();
-  return <Sidebar gymName={settings.gym_name} email={user.email ?? ""} staffName={role === "staff" ? name : null} signOut={signOut} />;
+  return (
+    <Sidebar
+      gymName={settings.gym_name}
+      logoUrl={logoUrlFor(settings.logo_path)}
+      email={user.email ?? ""}
+      staffName={role === "staff" ? name : null}
+      signOut={signOut}
+    />
+  );
 }

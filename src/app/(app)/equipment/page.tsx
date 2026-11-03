@@ -24,7 +24,7 @@ function EquipmentFields({ e }: { e?: Equipment }) {
         <Field label="Quantity" name="quantity" type="number" min={1} defaultValue={e?.quantity ?? 1} required />
         <SelectField label="Condition" name="status" defaultValue={e?.status ?? "working"} options={options(EQUIPMENT_STATUSES)} />
         <Field label="Purchase date" name="purchase_date" type="date" defaultValue={e?.purchase_date ?? ""} />
-        <Field label="Purchase cost" name="purchase_cost" type="number" step="0.01" min={0} defaultValue={e?.purchase_cost ?? 0} />
+        <Field label="Purchase cost" name="purchase_cost" type="number" step="0.01" min={0} defaultValue={e?.purchase_cost ?? 0} hint="Optional." />
         <Field label="Last service" name="last_service" type="date" defaultValue={e?.last_service ?? ""} />
         <Field label="Next service due" name="next_service" type="date" defaultValue={e?.next_service ?? ""} />
       </Grid>
@@ -113,7 +113,7 @@ export default async function EquipmentPage() {
                     <td>
                       <div className="flex justify-end gap-1">
                         {servicesOf(e.id).length > 0 && (
-                          <ViewDialog title={`Service history: ${e.name}`} trigger={<History size={14} />}>
+                          <ViewDialog title={`Service history: ${e.name}`} trigger={<><History size={14} /><span className="sm:sr-only">History</span></>}>
                             <ul className="divide-y divide-line text-sm">
                               {servicesOf(e.id).map((x) => (
                                 <li key={x.id} className="flex items-start justify-between gap-3 py-2">
@@ -128,7 +128,7 @@ export default async function EquipmentPage() {
                             </ul>
                           </ViewDialog>
                         )}
-                        <FormDialog title={`Log service: ${e.name}`} trigger={<Wrench size={14} />} triggerClass="btn-ghost btn-sm" action={logService} submitLabel="Log service">
+                        <FormDialog title={`Log service: ${e.name}`} trigger={<><Wrench size={14} /><span className="sm:sr-only">Service</span></>} triggerClass="btn-ghost btn-sm" action={logService} submitLabel="Log service">
                           <Hidden name="id" value={e.id} />
                           <Grid>
                             <Field label="Serviced on" name="serviced_on" type="date" defaultValue={today} required />
@@ -137,11 +137,12 @@ export default async function EquipmentPage() {
                             <Field label="Work done" name="notes" />
                           </Grid>
                         </FormDialog>
-                        <FormDialog title="Edit equipment" trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={saveEquipment} wide>
+                        <FormDialog title="Edit equipment" trigger={<><Pencil size={14} /><span className="sm:sr-only">Edit</span></>} triggerClass="btn-ghost btn-sm" action={saveEquipment} wide>
                           <EquipmentFields e={e} />
                         </FormDialog>
                         <ActionButton action={deleteRecord.bind(null, "equipment", e.id)} confirmLabel="Delete equipment" confirmText={`Delete ${e.name} from the register?`} successMessage="Equipment deleted">
                           <Trash2 size={14} />
+                          <span className="sm:sr-only">Delete</span>
                         </ActionButton>
                       </div>
                     </td>

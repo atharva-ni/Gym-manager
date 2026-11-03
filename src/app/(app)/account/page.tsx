@@ -1,4 +1,5 @@
 import { requireAccess } from "@/lib/auth";
+import { STAFF_CAN, STAFF_CANNOT } from "@/lib/constants";
 import { Card, PageHeader } from "@/components/ui";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { PasswordField } from "@/components/password-field";
@@ -18,7 +19,7 @@ export default async function AccountPage() {
           <p className="text-sm text-muted">{user.email}</p>
           <p className="mt-3 text-xs text-muted">
             {role === "staff"
-              ? "You can check members in, view members and collect fees. Ask the owner to change your email or access."
+              ? `${STAFF_CAN} ${STAFF_CANNOT} Ask the owner to change your email or access.`
               : "Full access."}
           </p>
         </Card>

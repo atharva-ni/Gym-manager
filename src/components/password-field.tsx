@@ -9,18 +9,20 @@ export function PasswordField({
   name,
   autoComplete = "current-password",
   minLength,
+  required = true,
 }: {
   label: string;
   name: string;
   autoComplete?: string;
   minLength?: number;
+  required?: boolean;
 }) {
   const [show, setShow] = useState(false);
   return (
     <label className="block">
       <span className="label">
         {label}
-        <span className="text-bad"> *</span>
+        {required && <span className="text-bad"> *</span>}
       </span>
       <span className="relative block">
         <input
@@ -29,7 +31,7 @@ export function PasswordField({
           type={show ? "text" : "password"}
           autoComplete={autoComplete}
           minLength={minLength}
-          required
+          required={required}
         />
         <button
           type="button"

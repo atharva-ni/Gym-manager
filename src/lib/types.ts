@@ -21,6 +21,12 @@ export type Settings = {
   expiry_alert_days: number;
   freeze_max_days: number | null;
   freeze_fee: number;
+  /** One-time fee charged on a new admission. */
+  admission_fee: number;
+  /** Most a staff login may discount (% of the fee); null = no limit. */
+  staff_max_discount_pct: number | null;
+  /** Gym logo in the public "brand" bucket. */
+  logo_path?: string | null;
 };
 
 export type PlanKind = "membership" | "personal_training" | "pass";
@@ -28,6 +34,8 @@ export type PlanKind = "membership" | "personal_training" | "pass";
 export type Plan = {
   id: string;
   name: string;
+  /** Calendar months (null for day-based plans such as day passes). */
+  duration_months: number | null;
   duration_days: number;
   price: number;
   admission_fee: number;

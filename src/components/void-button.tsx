@@ -13,7 +13,7 @@ export function VoidButton({ table, id, what, note }: { table: "payments" | "ref
       trigger={
         <>
           <Ban size={14} />
-          <span className="sr-only">Void</span>
+          <span className="sm:sr-only">Void</span>
         </>
       }
       triggerClass="btn-danger btn-sm"

@@ -48,7 +48,8 @@ export function MemberFields({
         <div className="space-y-4 border-t border-line p-3">
           <Grid>
             <Field label="Email" name="email" type="email" defaultValue={d?.email ?? ""} />
-            <Field label="Joined on" name="joined_on" type="date" defaultValue={member?.joined_on ?? today} required />
+            {/* New admissions: joined = the plan's start date (set when saving) */}
+            {member && <Field label="Joined on" name="joined_on" type="date" max={today} defaultValue={member.joined_on} required />}
             <SelectField
               label="Floor trainer"
               name="trainer_id"

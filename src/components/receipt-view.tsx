@@ -5,7 +5,7 @@ export type ReceiptData = {
   title: string;
   number: string;
   date: string;
-  gym: { gym_name: string; address: string | null; phone: string | null; email: string | null; currency: string; tax_rate: number };
+  gym: { gym_name: string; address: string | null; phone: string | null; email: string | null; currency: string; tax_rate: number; logo_url?: string | null };
   member: { full_name: string; member_code: string } | null;
   mode?: string | null;
   items: { label: string; sub?: string | null; fee?: number | null; amount: number }[];
@@ -26,6 +26,10 @@ export function ReceiptView({ r, actions }: { r: ReceiptData; actions?: ReactNod
     <main className="min-h-dvh bg-bg px-4 py-10 print:bg-white print:p-0">
       <div className="mx-auto max-w-md rounded-xl border border-line bg-surface p-8 print:border-0 print:text-black">
         <div className="border-b border-line pb-4 text-center">
+          {r.gym.logo_url && (
+            // eslint-disable-next-line @next/next/no-img-element -- logo from storage
+            <img src={r.gym.logo_url} alt="" className="mb-2 h-12 w-auto max-w-40 object-contain" />
+          )}
           <h1 className="text-xl font-semibold">{r.gym.gym_name}</h1>
           {r.gym.address && <p className="text-sm text-muted">{r.gym.address}</p>}
           <p className="text-sm text-muted">{[r.gym.phone, r.gym.email].filter(Boolean).join(" · ")}</p>

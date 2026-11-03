@@ -111,6 +111,10 @@ body {
   .num {
     @apply text-right tabular-nums;
   }
+  /* Number columns: header lines up with the right-aligned values */
+  .tbl th.num {
+    @apply text-right;
+  }
 }
 
 dialog::backdrop {
@@ -224,5 +228,43 @@ label {
   }
   .tbl-wrap .tbl td:empty {
     display: none;
+  }
+
+  /* Compact rows (payments): first line = 2nd cell + amount, second line =
+     the rest in small text, actions at the end. No per-cell labels. */
+  .tbl-compact .tbl tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 2px;
+  }
+  .tbl-compact .tbl td,
+  .tbl-compact .tbl tbody td:first-child {
+    display: block;
+    padding: 0;
+    font-size: 12px;
+    color: var(--muted);
+    text-align: left;
+  }
+  .tbl-compact .tbl td::before {
+    content: none !important;
+  }
+  .tbl-compact .tbl tbody td:nth-child(2) {
+    order: -2;
+    flex: 1 1 60%;
+    font-size: 15px;
+    color: var(--ink);
+  }
+  .tbl-compact .tbl tbody td.num {
+    order: -1;
+    font-size: 15px;
+    color: var(--ink);
+  }
+  .tbl-compact .tbl tbody td:last-child {
+    flex-basis: 100%;
+  }
+  .tbl-compact .tbl tbody td:last-child > div {
+    justify-content: flex-start;
   }
 }

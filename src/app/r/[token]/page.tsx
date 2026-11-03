@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getBrand } from "@/lib/brand";
 import { fmtDate } from "@/lib/format";
 import { label } from "@/lib/constants";
 import { ReceiptView, type ReceiptData } from "@/components/receipt-view";
@@ -50,7 +51,7 @@ export default async function SharedReceiptPage(props: PageProps<"/r/[token]">) 
     title: r.type === "sale" ? "Sale receipt" : "Payment receipt",
     number: r.receipt_no ?? "-",
     date: r.date,
-    gym: r.gym,
+    gym: { ...r.gym, logo_url: (await getBrand()).logoUrl },
     member: r.member,
     mode: `${label(r.method)}${r.reference ? ` · Ref ${r.reference}` : ""}`,
     items: (r.items ?? []).map((i) => ({

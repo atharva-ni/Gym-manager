@@ -19,9 +19,14 @@ export function SubmitButton({ children, className = "btn-primary" }: { children
 }
 
 function ErrorNote({ state }: { state: ActionState }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  // Long forms are saved from the bottom: bring the error into view
+  useEffect(() => {
+    if (state?.error) ref.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [state]);
   if (!state?.error) return null;
   return (
-    <p role="alert" className="rounded-lg bg-bad-soft px-3 py-2 text-sm text-bad">
+    <p ref={ref} role="alert" className="scroll-mt-20 rounded-lg bg-bad-soft px-3 py-2 text-sm text-bad">
       {state.error}
     </p>
   );
@@ -31,8 +36,10 @@ function ErrorNote({ state }: { state: ActionState }) {
  * Dialog shell: a bottom sheet on phones (full width, slides from the bottom,
  * clear of the home bar), a centred card from the sm breakpoint up.
  */
+// `visible pointer-events-auto`: a dialog opened from a RowMenu stays usable
+// after the menu around it hides (closed dialogs are still display: none)
 const sheet = (size: string) =>
-  `mx-0 mb-0 mt-auto w-full max-w-none rounded-t-2xl rounded-b-none border border-line bg-surface p-0 text-ink shadow-2xl sm:m-auto sm:w-[calc(100%-2rem)] ${size} sm:rounded-xl`;
+  `visible pointer-events-auto mx-0 mb-0 mt-auto w-full max-w-none rounded-t-2xl rounded-b-none border border-line bg-surface p-0 text-ink shadow-2xl sm:m-auto sm:w-[calc(100%-2rem)] ${size} sm:rounded-xl`;
 const sheetBody = "flex max-h-[92dvh] flex-col sm:max-h-[88vh]";
 const sheetFooter = "flex justify-end gap-2 border-t border-line px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:py-3";
 
@@ -60,7 +67,8 @@ export function FormDialog({
   submitLabel?: string;
   successMessage?: string;
   children: ReactNode;
-  wide?: boolean;
+  /** true: wider form; "xl": bills (form + summary side by side). */
+  wide?: boolean | "xl";
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [state, formAction] = useActionState(action, null);
@@ -90,14 +98,14 @@ export function FormDialog({
         className={triggerClass}
         onClick={open}
         aria-label={iconOnly ? title : undefined}
-        title={iconOnly ? title : undefined}
+        title={typeof trigger === "string" ? undefined : title}
       >
         {trigger}
       </button>
       <dialog
         ref={ref}
         aria-label={title}
-        className={sheet(wide ? "sm:max-w-2xl" : "sm:max-w-lg")}
+        className={sheet(wide === "xl" ? "sm:max-w-5xl" : wide ? "sm:max-w-2xl" : "sm:max-w-lg")}
       >
         <form key={formKey} action={formAction} className={sheetBody}>
           <header className="flex items-center justify-between border-b border-line px-5 py-3.5">
@@ -249,7 +257,7 @@ export function ViewDialog({
         className={triggerClass}
         onClick={() => ref.current?.showModal()}
         aria-label={iconOnly ? title : undefined}
-        title={iconOnly ? title : undefined}
+        title={typeof trigger === "string" ? undefined : title}
       >
         {trigger}
       </button>

@@ -93,8 +93,14 @@ export function Stat({
   return href ? <Link href={href}>{body}</Link> : body;
 }
 
-export function Empty({ children }: { children: ReactNode }) {
-  return <p className="px-5 py-10 text-center text-sm text-muted">{children}</p>;
+/** Empty state: one short line, and optionally the next step (a button or link). */
+export function Empty({ children, action }: { children: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center gap-3 px-5 py-8 text-center text-sm text-muted">
+      <p>{children}</p>
+      {action}
+    </div>
+  );
 }
 
 // Tables become stacked cards on phones (see table-wrap.tsx)

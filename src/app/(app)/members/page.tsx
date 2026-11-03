@@ -2,7 +2,7 @@ import Link from "next/link";
 import Form from "next/form";
 import { Plus, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings, requireAccess } from "@/lib/auth";
+import { getSettings } from "@/lib/auth";
 import { photoUrls } from "@/lib/photos";
 import { addDays, fmtDate, localDate, money, todayISO } from "@/lib/format";
 import { daysLeftText, membershipState } from "@/lib/member-state";
@@ -31,7 +31,6 @@ export default async function MembersPage(props: PageProps<"/members">) {
   const page = Math.max(1, Number(sp.page) || 1);
 
   const settings = await getSettings();
-  const isOwner = (await requireAccess()).role === "owner";
   const today = todayISO(settings.timezone);
   const soon = addDays(today, settings.expiry_alert_days);
   const sb = await createClient();
@@ -87,11 +86,9 @@ export default async function MembersPage(props: PageProps<"/members">) {
         title="Members"
         description={`${total} member${total === 1 ? "" : "s"}${filter !== "all" ? ` · ${FILTERS.find((f) => f.key === filter)?.label}` : ""}`}
         actions={
-          isOwner && (
-            <Link href="/members/new" className="btn-primary">
-              <Plus size={16} /> New admission
-            </Link>
-          )
+          <Link href="/members/new" className="btn-primary">
+            <Plus size={16} /> New admission
+          </Link>
         }
       />
 
@@ -114,12 +111,7 @@ export default async function MembersPage(props: PageProps<"/members">) {
               "No members match this view."
             ) : (
               <>
-                No members yet.{" "}
-                {isOwner && (
-                  <>
-                    <Link href="/members/new" className="text-brand underline">Add your first admission</Link>.
-                  </>
-                )}
+                No members yet. <Link href="/members/new" className="text-brand underline">Add your first admission</Link>.
               </>
             )}
           </Empty>
@@ -175,7 +167,7 @@ export default async function MembersPage(props: PageProps<"/members">) {
                       <td className={`num ${Number(m.balance_due) > 0 ? "font-medium text-bad" : ""}`}>
                         {Number(m.balance_due) > 0 ? money(m.balance_due, settings.currency) : "-"}
                       </td>
-                      <td className="text-xs">{m.last_visit ? fmtDate(localDate(m.last_visit, settings.timezone)) : "Never"}</td>
+                      <td className="text-xs">{m.last_visit ? fmtDate(localDate(m.last_visit, settings.timezone)) : <span className="text-muted">-</span>}</td>
                     </tr>
                   );
                 })}

@@ -160,7 +160,7 @@ test("day passes are not counted as members", async () => {
   assert.equal((await a(`select membership_kind from member_overview`))[0].membership_kind, "pass");
 });
 
-test("upgrading an existing database: v1 -> 002 ... 009 (re-runnable)", async () => {
+test("upgrading an existing database: v1 -> 002 ... 012 (re-runnable)", async () => {
   const db = await freshDb("tests/fixtures/schema_v1.sql");
   await db.exec(`
     insert into public.plans (owner_id, name, duration_days, price) values ('${A}', 'Old Monthly', 30, 1500);
@@ -170,7 +170,7 @@ test("upgrading an existing database: v1 -> 002 ... 009 (re-runnable)", async ()
     insert into public.payments (owner_id, member_id, membership_id, amount)
       select '${A}', member_id, id, 1000 from public.memberships;
   `);
-  for (const m of ["002_payments_and_pt", "003_receipts", "004_freeze_refunds_passes", "005_unfreeze_status", "006_operations", "007_performance_optimization", "008_member_photos", "009_staff_and_activity"]) {
+  for (const m of ["002_payments_and_pt", "003_receipts", "004_freeze_refunds_passes", "005_unfreeze_status", "006_operations", "007_performance_optimization", "008_member_photos", "009_staff_and_activity", "010_plan_options", "011_desk_fixes", "012_branding"]) {
     await db.exec(sql(`supabase/migrations/${m}.sql`));
     await db.exec(sql(`supabase/migrations/${m}.sql`)); // safe to run twice
   }
@@ -180,6 +180,7 @@ test("upgrading an existing database: v1 -> 002 ... 009 (re-runnable)", async ()
   assert.deepEqual(m, { phone_digits: "9876543210", balance_due: 500, membership_kind: "membership" });
   assert.equal((await a(`select my_access()->>'role' r`))[0].r, "owner", "the existing owner keeps access");
   assert.equal((await a(`select photo_path from member_overview`))[0].photo_path, null);
+  assert.equal((await a(`select duration_months from plans`))[0].duration_months, 1, "30-day plan became 1 month");
   assert.equal((await a(`select receipt_no from payments`))[0].receipt_no, "R-00001");
   const [{ r }] = await a(`select record_payments($1) r`, [JSON.stringify([{ member_id: (await a(`select id from members`))[0].id, amount: 100, method: "cash" }])]);
   assert.equal(r, "R-00002");
@@ -348,6 +349,8 @@ test("shared receipt links work without login and reveal nothing else", async ()
     }
   };
   const [{ r }] = await run(`select public_receipt($1) r`, [share_token]);
+  const [{ b }] = await run(`select gym_public_brand() b`);
+  assert.deepEqual(Object.keys(b).sort(), ["logo_path", "name"], "only the name and logo are public");
   assert.equal(r.receipt_no, "R-00001");
   assert.equal(r.member.full_name, "Asha Rao");
   assert.equal(Number(r.balance), 500);
@@ -380,12 +383,21 @@ test("staff can check in and collect fees for the owner's gym, and nothing else"
   assert.equal((await s(`select count(*)::int n from expenses`))[0].n, 0);
   assert.equal((await s(`select count(*)::int n from trainers`))[0].n, 0);
   assert.equal((await s(`select count(*)::int n from activity_log`))[0].n, 0);
-  await assert.rejects(s(`select collect_fee($1, 200, 'waive', null, '[]'::jsonb)`, [ms.id]), /Only the owner/);
+  // Discounts up to the owner's cap (10% of 1,500 = 150)
+  await a(`update gym_settings set staff_max_discount_pct = 10`);
+  await assert.rejects(s(`select collect_fee($1, 200, 'waive', null, '[]'::jsonb)`, [ms.id]), /at most 10/);
+  await s(`select collect_fee($1, 100, 'Student', null, '[]'::jsonb)`, [ms.id]);
+  assert.equal(Number((await a(`select discount from memberships`))[0].discount), 100);
   await assert.rejects(s(`update memberships set price = 1 where id = $1`, [ms.id]), /Only the owner/);
   await assert.rejects(s(`select void_record('payments', id, 'mistake') from payments`), /Only the owner/);
   await s(`delete from payments`); // no delete rights: silently nothing
   assert.equal((await a(`select count(*)::int n from payments`))[0].n, 1);
-  await assert.rejects(s(`insert into members (full_name, phone) values ('X', '9000000009')`));
+  // Admissions and renewals at the listed price only
+  const [m2] = await s(`insert into members (full_name, phone) values ('Walk In', '9000000009') returning id`);
+  await assert.rejects(s(`select save_bill($1, $2, '[]'::jsonb)`, [m2.id, JSON.stringify([line(plan, { price: 999 })])]), /listed price/);
+  await s(`select save_bill($1, $2, '[]'::jsonb)`, [m2.id, JSON.stringify([line(plan, { price: 1500, discount: 150 })])]);
+  await assert.rejects(s(`delete from members where id = $1 returning id`, [m2.id]).then((r) => { if (!r.length) throw new Error("no delete"); }));
+  assert.deepEqual((await s(`select full_name from trainer_options()`)).map((t) => t.full_name), ["Coach"]);
 
   // Deactivated staff lose access at once; strangers never had any
   await a(`update staff_accounts set active = false`);
@@ -437,4 +449,73 @@ test("a brand-new install is claimed by the first account to sign in", async () 
   assert.equal((await as(db, A)(`select claim_gym() c`))[0].c, false);
   await b(`insert into members (full_name, phone) values ('First', '9000000001')`);
   assert.equal((await b(`select count(*)::int n from members`))[0].n, 1);
+});
+
+test("plans with durations: create, rename, duplicates rejected, sold options switched off", async () => {
+  const { a, member } = await setup();
+  const opts = (o) => JSON.stringify(o);
+  await a(`select save_plan_group('membership', null, 'Silver', 'Gym access', true, $1)`,
+    [opts([{ duration_months: 1, price: 1500 }, { duration_months: 3, price: 4000 }, { duration_months: 12, price: 13000 }])]);
+  let rows = await a(`select name, duration_months, duration_days, price::float, is_active from plans where name = 'Silver' order by duration_months`);
+  assert.deepEqual(rows.map((r) => [r.duration_months, r.duration_days, r.price]), [[1, 30, 1500], [3, 90, 4000], [12, 360, 13000]]);
+  await assert.rejects(a(`select save_plan_group('membership', null, 'silver', null, true, $1)`, [opts([{ duration_months: 1, price: 1 }])]), /already a plan/);
+  await assert.rejects(a(`select save_plan_group('membership', null, 'Gold', null, true, $1)`,
+    [opts([{ duration_months: 1, price: 1 }, { duration_months: 1, price: 2 }])]), /only be listed once/);
+
+  // Sell the 3-month option, then remove it and the 12-month one from the plan
+  const ids = Object.fromEntries((await a(`select id, duration_months from plans where name = 'Silver'`)).map((r) => [r.duration_months, r.id]));
+  await a(`insert into memberships (member_id, plan_id, plan_name, start_date, end_date, price) values ($1, $2, 'Silver · 3 months', '2026-10-01', '2026-12-31', 4000)`, [member.id, ids[3]]);
+  await a(`select save_plan_group('membership', 'Silver', 'Silver Plan', null, true, $1)`, [opts([{ id: ids[1], duration_months: 1, price: 1600 }])]);
+  rows = await a(`select name, duration_months, price::float, is_active from plans where kind = 'membership' and name like 'Silver%' order by duration_months`);
+  assert.deepEqual(rows, [
+    { name: "Silver Plan", duration_months: 1, price: 1600, is_active: true },
+    { name: "Silver Plan", duration_months: 3, price: 4000, is_active: false },
+  ], "renamed, price updated, sold option kept but switched off, unsold one deleted");
+  await a(`select delete_plan_group('membership', 'Silver Plan')`);
+  assert.deepEqual(await a(`select duration_months, is_active from plans where name = 'Silver Plan'`), [{ duration_months: 3, is_active: false }]);
+});
+
+test("Fees page totals cover every payment in the range, not just the first 1,000", async () => {
+  const { a, member } = await setup();
+  await a(`insert into payments (member_id, amount, method, paid_on)
+           select $1, 100, case when g % 4 = 0 then 'cash' else 'upi' end, '2026-10-01'::date + (g % 28)
+             from generate_series(1, 1200) g`, [member.id]);
+  await a(`insert into refunds (member_id, amount, method, refunded_on) values ($1, 500, 'cash', '2026-10-10')`, [member.id]);
+  const [{ s }] = await a(`select payments_summary('2026-10-01', '2026-10-31') s`);
+  assert.deepEqual(s, { received: 120000, payments: 1200, refunded: 500, top_method: "upi", top_amount: 90000 });
+  const [{ s: cash }] = await a(`select payments_summary('2026-10-01', '2026-10-31', 'cash') s`);
+  assert.deepEqual([cash.received, cash.refunded], [30000, 500]);
+});
+
+test("desk fixes: joined follows the first plan, staff log PT sessions, day close, one receipt for all dues", async () => {
+  const { db, a, plan, pt, trainer, member } = await setup();
+  // A past admission entered today: joined moves back to the plan start
+  await a(`update members set joined_on = '2026-11-02'`);
+  await a(`select save_bill($1, $2, '[]'::jsonb)`, [member.id, JSON.stringify([line(plan, { start_date: "2026-10-07", end_date: "2026-11-06" })])]);
+  assert.equal((await a(`select joined_on::text j from members`))[0].j, "2026-10-07");
+
+  // One payment across two fees = one receipt
+  await a(`select save_bill($1, $2, '[]'::jsonb)`, [member.id, JSON.stringify([line(pt, { trainer_id: trainer.id, sessions_total: 12 })])]);
+  const fees = await a(`select id from memberships order by kind`); // membership, then personal_training
+  const [{ r }] = await a(`select collect_fee($1, 0, null, '2026-11-10', $2) r`, [fees[1].id, JSON.stringify([
+    { member_id: member.id, membership_id: fees[0].id, amount: 1500, method: "cash", paid_on: "2026-11-02" },
+    { member_id: member.id, membership_id: fees[1].id, amount: 1000, method: "cash", paid_on: "2026-11-02" },
+  ])]);
+  assert.deepEqual((await a(`select distinct receipt_no from payments`)).map((x) => x.receipt_no), [r]);
+
+  // Staff log a session but can't undo one
+  await a(`insert into staff_accounts (email, full_name) values ('desk@example.com', 'Ravi')`);
+  const s = as(db, S);
+  await s(`select my_access()`);
+  await s(`select log_pt_session($1, '2026-11-02', 'Legs')`, [fees[1].id]);
+  assert.equal((await a(`select sessions_used from memberships where id = $1`, [fees[1].id]))[0].sessions_used, 1);
+  await assert.rejects(s(`select undo_pt_session($1)`, [fees[1].id]), /Only the owner/);
+
+  // Day close: cash in, a refund out and a cash counter sale
+  await a(`insert into refunds (member_id, amount, method, refunded_on) values ($1, 200, 'cash', '2026-11-02')`, [member.id]);
+  const [prod] = await a(`insert into products (name, price, cost, stock) values ('Water', 20, 10, 10) returning id`);
+  await a(`select pos_sale($1, 2, 20, null, 'cash', '2026-11-02', false, null)`, [prod.id]);
+  const close = await a(`select method, received::float, refunded::float, sales::float, net::float from day_close('2026-11-02')`);
+  assert.deepEqual(close, [{ method: "cash", received: 2500, refunded: 200, sales: 40, net: 2340 }]);
+  await assert.rejects(s(`select * from day_close('2026-11-02')`), /Only the owner/);
 });

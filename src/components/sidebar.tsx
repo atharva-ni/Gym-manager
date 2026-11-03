@@ -37,6 +37,7 @@ const NAV = [
 const STAFF_NAV = [
   { group: "Front desk", items: [
     { href: "/attendance", label: "Check-in", icon: ClipboardCheck },
+    { href: "/members/new", label: "New admission", icon: UserPlus },
     { href: "/members", label: "Members", icon: Users },
     { href: "/payments", label: "Fees & payments", icon: CreditCard },
     { href: "/account", label: "My account", icon: KeyRound },
@@ -63,11 +64,14 @@ const STAFF_TABS = [
  */
 export function Sidebar({
   gymName,
+  logoUrl,
   email,
   staffName,
   signOut,
 }: {
   gymName: string;
+  /** Gym logo (Settings), shown instead of the dumbbell. */
+  logoUrl: string | null;
   email: string;
   /** Set for staff logins, which get the front-desk menu only. */
   staffName: string | null;
@@ -79,7 +83,10 @@ export function Sidebar({
   const nav = isStaff ? STAFF_NAV : NAV;
   const tabs = isStaff ? STAFF_TABS : TABS;
   const home = isStaff ? "/attendance" : "/";
-  const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
+  const hrefs = nav.flatMap((g) => g.items.map((i) => i.href));
+  // Closest match only: /members/new highlights "New admission", not "Members" too
+  const isActive = (href: string) =>
+    href === "/" ? path === "/" : path.startsWith(href) && !hrefs.some((h) => h.length > href.length && h.startsWith(href) && path.startsWith(h));
   const inTabs = tabs.some((t) => isActive(t.href));
 
   // Close the drawer with Escape, and stop the page behind it scrolling
@@ -100,16 +107,19 @@ export function Sidebar({
       {/* Phone top bar */}
       <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-line bg-surface/95 px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur lg:hidden">
         <Link href={home} className="flex min-w-0 items-center gap-2 font-semibold">
-          <span className="rounded-lg bg-brand p-1.5 text-white">
-            <Dumbbell size={16} />
-          </span>
+          {logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- logo from storage
+            <img src={logoUrl} alt="" className="size-7 rounded-lg object-contain" />
+          ) : (
+            <span className="rounded-lg bg-brand p-1.5 text-white">
+              <Dumbbell size={16} />
+            </span>
+          )}
           <span className="truncate">{gymName}</span>
         </Link>
-        {!isStaff && (
-          <Link href="/members/new" className="btn-primary btn-sm shrink-0" aria-label="New admission">
-            <UserPlus size={16} /> <span className="hidden min-[380px]:inline">Admission</span>
-          </Link>
-        )}
+        <Link href="/members/new" className="btn-primary btn-sm shrink-0" aria-label="New admission">
+          <UserPlus size={16} /> <span className="hidden min-[380px]:inline">Admission</span>
+        </Link>
       </header>
 
       {open && <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setOpen(false)} aria-hidden />}
@@ -122,9 +132,14 @@ export function Sidebar({
       >
         <div className="flex items-center justify-between px-5 py-4 lg:py-5">
           <Link href={home} className="flex min-w-0 items-center gap-2.5" onClick={() => setOpen(false)}>
-            <span className="rounded-lg bg-brand p-1.5 text-white">
-              <Dumbbell size={18} />
-            </span>
+            {logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- logo from storage
+              <img src={logoUrl} alt="" className="size-8 rounded-lg bg-white object-contain p-0.5" />
+            ) : (
+              <span className="rounded-lg bg-brand p-1.5 text-white">
+                <Dumbbell size={18} />
+              </span>
+            )}
             <span className="truncate font-semibold text-white">{gymName}</span>
           </Link>
           <button

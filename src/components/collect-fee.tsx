@@ -6,6 +6,7 @@ import { PaymentModeFields } from "@/components/payment-mode-fields";
 import { pendingFeesFor } from "@/app/actions";
 import { addDays, fmtDate, money } from "@/lib/format";
 import { label, PAYMENT_CATEGORIES } from "@/lib/constants";
+import { allocateAcrossFees } from "@/lib/billing";
 
 /** A membership or PT package that still has money owed on it. */
 export type PendingFee = {
@@ -20,13 +21,17 @@ export type PendingFee = {
 };
 
 const OTHER = "other";
+/** One payment spread over every pending fee, oldest first. */
+const ALL = "all";
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
  * Fields for collecting money from a member. Pass `memberId` + `fees` for a
  * known member, or nothing to show a member search (fees then load for the
  * member picked). Full or part payment, optional discount / waive-off, and
- * one or two payment modes. "Other" covers admission, single PT sessions etc.
+ * one or two payment modes. With two or more fees pending, "All pending
+ * fees" pays them oldest first on one receipt. "Other" covers single PT
+ * sessions and anything not on a bill.
  */
 export function CollectFeeFields({
   memberId: fixedMemberId,
@@ -34,30 +39,33 @@ export function CollectFeeFields({
   currency,
   today,
   defaultFeeId,
-  canWaive = true,
 }: {
   memberId?: string;
   fees?: PendingFee[];
   currency: string;
   today: string;
   defaultFeeId?: string;
-  /** Staff logins can't give discounts, so the field is hidden for them. */
-  canWaive?: boolean;
 }) {
   const [memberId, setMemberId] = useState<string | null>(fixedMemberId ?? null);
   const [fees, setFees] = useState<PendingFee[]>(initialFees);
-  const [feeId, setFeeId] = useState<string>(defaultFeeId ?? initialFees[0]?.id ?? OTHER);
+  const firstChoice = (list: PendingFee[]) => (list.length > 1 ? ALL : (list[0]?.id ?? OTHER));
+  const [feeId, setFeeId] = useState<string>(defaultFeeId ?? firstChoice(initialFees));
   const [amount, setAmount] = useState<string | null>(null); // null = pay the full balance
   const [waive, setWaive] = useState("");
   const [loading, startLoading] = useTransition();
 
-  const fee = fees.find((f) => f.id === feeId);
-  const totalDue = fees.reduce((s, f) => s + Number(f.balance), 0);
+  const all = feeId === ALL && fees.length > 1;
+  const totalDue = r2(fees.reduce((s, f) => s + Number(f.balance), 0));
+  // "All pending fees" behaves like one big fee with no discount
+  const fee: PendingFee | undefined = all
+    ? { id: ALL, member_id: memberId ?? "", plan_name: "All pending fees", kind: "membership", start_date: "", end_date: "", balance: totalDue, balance_due_on: null }
+    : fees.find((f) => f.id === feeId);
   const balance = fee ? Number(fee.balance) : 0;
   const discount = Math.min(balance, Math.max(0, Number(waive) || 0));
   const payable = r2(balance - discount);
   const paying = fee ? (amount === null ? payable : Math.min(payable, Math.max(0, Number(amount) || 0))) : Number(amount) || 0;
   const remaining = fee ? r2(payable - paying) : 0;
+  const split = all ? allocateAcrossFees(paying, fees.map((f) => Number(f.balance))) : [];
 
   const pickFee = (id: string) => {
     setFeeId(id);
@@ -80,7 +88,7 @@ export function CollectFeeFields({
               startLoading(async () => {
                 const list = await pendingFeesFor(m.id);
                 setFees(list);
-                pickFee(list[0]?.id ?? OTHER);
+                pickFee(firstChoice(list));
               });
             }
           }}
@@ -103,23 +111,26 @@ export function CollectFeeFields({
 
           <label className="block">
             <span className="label">Pay towards</span>
-            <select className="input" name="membership_id" value={feeId === OTHER ? "" : feeId} onChange={(e) => pickFee(e.target.value || OTHER)}>
+            <input type="hidden" name="membership_id" value={fee && !all ? fee.id : ""} />
+            <input type="hidden" name="pay_all" value={all ? "1" : ""} />
+            <select className="input" value={feeId} onChange={(e) => pickFee(e.target.value)}>
+              {fees.length > 1 && <option value={ALL}>All pending fees · {money(totalDue, currency)}</option>}
               {fees.map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.kind === "personal_training" ? "PT: " : f.kind === "charge" ? "Due: " : ""}
-                  {f.plan_name}
-                  {f.kind === "charge" ? ` (${fmtDate(f.start_date)})` : ` (${fmtDate(f.start_date)} to ${fmtDate(f.end_date)})`} · due {money(f.balance, currency)}
+                  {f.plan_name} · due {money(f.balance, currency)}
+                  {f.kind === "charge" ? "" : ` (till ${fmtDate(f.end_date)})`}
                 </option>
               ))}
-              <option value="">Other payment (admission, single PT session, misc.)</option>
+              <option value={OTHER}>Other payment (single PT session, misc.)</option>
             </select>
           </label>
           <input type="hidden" name="category" value={fee ? (fee.kind === "personal_training" ? "personal_training" : "membership") : ""} disabled={!fee} />
           {!fee && (
             <label className="block">
               <span className="label">Payment for</span>
-              <select name="category" defaultValue="admission" className="input">
-                {PAYMENT_CATEGORIES.filter((c) => c !== "membership").map((c) => (
+              <select name="category" defaultValue="other" className="input">
+                {PAYMENT_CATEGORIES.filter((c) => c !== "membership" && c !== "admission").map((c) => (
                   <option key={c} value={c}>{label(c)}</option>
                 ))}
               </select>
@@ -168,10 +179,10 @@ export function CollectFeeFields({
               />
             </label>
             <label className="block">
-              <span className="label">Date<span className="text-bad"> *</span></span>
+              <span className="label">Payment date<span className="text-bad"> *</span></span>
               <input className="input" name="paid_on" type="date" defaultValue={today} max={today} required />
             </label>
-            {fee && canWaive && (
+            {fee && !all && (
               <label className="block">
                 <span className="label">Discount / waive off</span>
                 <input
@@ -207,6 +218,26 @@ export function CollectFeeFields({
           </div>
 
           <PaymentModeFields total={paying} currency={currency} />
+
+          {all && (
+            <ul className="space-y-1 rounded-lg border border-line p-3 text-sm">
+              {fees.map((f, i) => {
+                const left = r2(Number(f.balance) - split[i]);
+                return (
+                  <li key={f.id} className="flex justify-between gap-3">
+                    <span className="min-w-0 text-ink-2">
+                      {f.kind === "personal_training" ? "PT: " : ""}
+                      {f.plan_name} <span className="text-muted">({money(f.balance, currency)})</span>
+                    </span>
+                    <span className={`shrink-0 tabular-nums ${left > 0 ? "text-bad" : "text-good"}`}>
+                      {split[i] > 0 ? money(split[i], currency) : "-"}
+                      {left > 0 ? ` · ${money(left, currency)} left` : " · paid"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
 
           {fee && (
             <div className="rounded-lg bg-surface-2 p-3 text-sm">

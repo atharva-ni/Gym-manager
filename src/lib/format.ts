@@ -1,13 +1,23 @@
 /** Indian locale: ₹1,00,000 grouping, "11 Oct 2026" dates. */
 const LOCALE = "en-IN";
 
+/** "₹3,000" for whole rupees, "₹1,333.50" only when there are paise. */
 export function money(amount: number | string | null | undefined, currency = "INR") {
-  const n = Number(amount ?? 0);
+  const n = Math.round(Number(amount ?? 0) * 100) / 100;
+  const digits = Number.isInteger(n) ? 0 : 2;
   try {
-    return new Intl.NumberFormat(LOCALE, { style: "currency", currency, maximumFractionDigits: 2 }).format(n);
+    return new Intl.NumberFormat(LOCALE, { style: "currency", currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
   } catch {
-    return `${currency} ${n.toFixed(2)}`;
+    return `${currency} ${n.toFixed(digits)}`;
   }
+}
+
+/** Same as money(); kept for the plan tiles. */
+export const priceTag = money;
+
+/** "1 payment", "3 payments" (pass the plural when it isn't word + "s"). */
+export function plural(n: number, word: string, many = `${word}s`) {
+  return `${n} ${n === 1 ? word : many}`;
 }
 
 export function compactMoney(amount: number, currency = "INR") {

@@ -9,6 +9,7 @@ import { waLink } from "@/lib/whatsapp";
 import type { MembershipBalance, Payment } from "@/lib/types";
 import { ReceiptView, type ReceiptData } from "@/components/receipt-view";
 import { PrintButton } from "./print-button";
+import { logoUrlFor } from "@/lib/brand";
 
 export const metadata = { title: "Receipt · SetFit Fitness" };
 
@@ -24,7 +25,7 @@ export default async function ReceiptPage(props: PageProps<"/receipt/[id]">) {
   const id = decodeURIComponent(raw);
   const settings = await getSettings();
   const sb = await createClient();
-  const gym = settings;
+  const gym = { ...settings, logo_url: logoUrlFor(settings.logo_path) };
   let data: ReceiptData;
   let share: { phone: string | null | undefined; token: string; no: string } | null = null;
 

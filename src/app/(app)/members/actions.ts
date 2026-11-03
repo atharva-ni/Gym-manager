@@ -9,6 +9,7 @@ import { addDays, money, todayISO } from "@/lib/format";
 import { getAccess, getSettings } from "@/lib/auth";
 import { PHOTO_BUCKET, photoFromForm, removeFiles, uploadMemberPhoto } from "@/lib/photos";
 import { allocatePayments, phoneDigits, planChangeCredit, r2, split, type ModeSplit } from "@/lib/billing";
+import { planEnd, planLabel } from "@/lib/plans";
 import type { ActionState, MembershipBalance, PlanKind } from "@/lib/types";
 
 const MEMBER_SPEC = {
@@ -17,7 +18,7 @@ const MEMBER_SPEC = {
   email: "text",
   gender: "text",
   date_of_birth: "date",
-  joined_on: "date!",
+  joined_on: "date",
   trainer_id: "uuid",
   address: "text",
   emergency_name: "text",
@@ -26,11 +27,11 @@ const MEMBER_SPEC = {
   notes: "text",
 } as const;
 
-type Ctx = { today: string; currency: string };
+type Ctx = { today: string; currency: string; admissionFee: number };
 
 async function ctx(): Promise<Ctx> {
   const s = await getSettings();
-  return { today: todayISO(s.timezone), currency: s.currency };
+  return { today: todayISO(s.timezone), currency: s.currency, admissionFee: Number(s.admission_fee ?? 0) };
 }
 
 // ---------------------------------------------------------------------------
@@ -67,19 +68,34 @@ type PlanRow = {
   name: string;
   kind: PlanKind;
   sessions: number | null;
+  duration_months: number | null;
   duration_days: number;
   price: number;
-  admission_fee: number;
+};
+
+/** One line of a bill: a plan, PT package or pass, or the admission fee. */
+type BillItem = {
+  planId: string | null;
+  /** Stored on the member's record and receipt: "Silver · 3 months", "Admission fee". */
+  name: string;
+  kind: PlanKind | "charge";
+  sessions: number | null;
+  start: string;
+  end: string;
+  price: number;
+  trainerId?: string | null;
 };
 
 type BillInput = {
-  items: { plan: PlanRow; start: string; price: number; trainer_id?: string | null }[];
+  items: BillItem[];
   discountValue: number;
   discountType: "amount" | "percent";
   discountReason?: string | null;
   /** Credit carried over from a plan being replaced (applied like a discount). */
   credit?: { amount: number; note: string };
   paid: number;
+  /** Date the money was received (today, or earlier when entering past paperwork). */
+  paidOn: string;
   modes: ModeSplit[];
   reference?: string | null;
   dueOn?: string | null;
@@ -87,6 +103,29 @@ type BillInput = {
   /** Old plan to close first (plan change). */
   close?: { id: string; end_date: string; discount: number; note: string };
 };
+
+/** A plan option as a bill line, ending on the right calendar day. */
+function planItem(plan: PlanRow, start: string, trainerId?: string | null): BillItem {
+  const isPT = plan.kind === "personal_training";
+  return {
+    planId: plan.id,
+    name: planLabel(plan),
+    kind: plan.kind,
+    sessions: isPT ? plan.sessions : null,
+    start,
+    end: planEnd(start, plan),
+    price: Number(plan.price),
+    trainerId: isPT ? (trainerId ?? null) : null,
+  };
+}
+
+/** Money received on this bill: today by default, never in the future or over a year back. */
+function readPaidOn(value: unknown, c: Ctx) {
+  const paidOn = (value as string | null) ?? c.today;
+  if (paidOn > c.today) throw new FormError("Payment date can't be in the future");
+  if (paidOn < addDays(c.today, -366)) throw new FormError("Payment date can be at most a year back");
+  return paidOn;
+}
 
 /** Payment modes from the form: one mode, or two when "split payment" is on. */
 function readModes(f: Row, paid: number): ModeSplit[] {
@@ -102,7 +141,7 @@ function readModes(f: Row, paid: number): ModeSplit[] {
   ];
 }
 
-const PLAN_COLS = "id, name, kind, sessions, duration_days, price, admission_fee";
+const PLAN_COLS = "id, name, kind, sessions, duration_months, duration_days, price";
 
 /** Read the bill fields posted by components/bill-fields.tsx. */
 async function readBillForm(sb: SupabaseClient, fd: FormData, c: Ctx): Promise<BillInput> {
@@ -123,6 +162,7 @@ async function readBillForm(sb: SupabaseClient, fd: FormData, c: Ctx): Promise<B
     amount2: "number",
     reference: "text",
     balance_due_on: "date",
+    paid_on: "date",
     notes: "text",
   });
   if (!f.plan_id && !f.pt_plan_id) throw new FormError("Choose a membership plan or a PT package for the bill");
@@ -135,19 +175,18 @@ async function readBillForm(sb: SupabaseClient, fd: FormData, c: Ctx): Promise<B
   const pt = (plans as PlanRow[]).find((p) => p.id === f.pt_plan_id);
   if ((f.plan_id && !plan) || (f.pt_plan_id && !pt)) throw new FormError("Selected plan was not found");
 
-  const items: BillInput["items"] = [];
-  if (plan) {
-    items.push({
-      plan,
-      start: (f.start_date as string | null) ?? c.today,
-      price: Number(plan.price) + (f.include_admission ? Number(plan.admission_fee) : 0),
-    });
+  const items: BillItem[] = [];
+  if (plan) items.push(planItem(plan, (f.start_date as string | null) ?? c.today));
+  if (pt) items.push(planItem(pt, (f.pt_start_date as string | null) ?? c.today, f.trainer_id as string));
+  // The one-time admission fee is its own line: never refunded or credited on a plan change
+  if (f.include_admission && c.admissionFee > 0) {
+    items.push({ planId: null, name: "Admission fee", kind: "charge", sessions: null, start: items[0].start, end: items[0].start, price: c.admissionFee });
   }
-  if (pt) items.push({ plan: pt, start: (f.pt_start_date as string | null) ?? c.today, price: Number(pt.price), trainer_id: f.trainer_id as string });
 
   const paid = r2(Number(f.amount_paid ?? 0));
   return {
     items,
+    paidOn: readPaidOn(f.paid_on, c),
     discountValue: Number(f.discount_value ?? 0),
     discountType: f.discount_type === "percent" ? "percent" : "amount",
     discountReason: f.discount_reason as string | null,
@@ -189,26 +228,24 @@ async function saveBill(sb: SupabaseClient, memberId: string, b: BillInput, c: C
       .filter(Boolean)
       .join("\n") || null;
 
-  const lines = b.items.map((l, i) => {
-    const isPT = l.plan.kind === "personal_training";
-    return {
-      plan_id: l.plan.id,
-      plan_name: l.plan.name,
-      kind: l.plan.kind,
-      trainer_id: isPT ? (l.trainer_id ?? null) : null,
-      sessions_total: isPT ? l.plan.sessions : null,
-      start_date: l.start,
-      end_date: addDays(l.start, l.plan.duration_days - 1),
-      price: l.price,
-      discount: discounts[i],
-      balance_due_on: nets[i] - paids[i] > 0.005 ? dueOn : null,
-      notes,
-    };
-  });
+  const lines = b.items.map((l, i) => ({
+    plan_id: l.planId,
+    plan_name: l.name,
+    kind: l.kind,
+    trainer_id: l.trainerId ?? null,
+    sessions_total: l.sessions,
+    start_date: l.start,
+    end_date: l.end,
+    price: l.price,
+    discount: discounts[i],
+    balance_due_on: nets[i] - paids[i] > 0.005 ? dueOn : null,
+    notes,
+  }));
+  const category = { personal_training: "personal_training", charge: "admission" } as Record<string, string>;
   const payments = allocatePayments(paids, b.modes).map((p) => ({
     ...p,
-    category: b.items[p.line].plan.kind === "personal_training" ? "personal_training" : "membership",
-    paid_on: c.today,
+    category: category[b.items[p.line].kind] ?? "membership",
+    paid_on: b.paidOn,
     reference: b.reference ?? null,
   }));
 
@@ -236,6 +273,8 @@ export async function createMember(_: ActionState, fd: FormData): Promise<Action
   let photo: string | null = null;
   const res = await runMutation(async (sb) => {
     const row = parseForm(fd, MEMBER_SPEC);
+    // Joined = when their first plan starts (today if there's no plan on the bill)
+    row.joined_on ??= (fd.get("plan_id") && (fd.get("start_date") as string)) || (fd.get("pt_plan_id") && (fd.get("pt_start_date") as string)) || c.today;
     await assertNoDuplicate(sb, fd, row.phone as string);
     // Read and check the bill before creating anything
     const bill = fd.get("plan_id") || fd.get("pt_plan_id") ? await readBillForm(sb, fd, c) : null;
@@ -271,7 +310,7 @@ export async function updateMember(_: ActionState, fd: FormData): Promise<Action
   let newPhoto: string | null = null;
   let saved = false;
   const res = await runMutation(async (sb) => {
-    const row = parseForm(fd, { ...MEMBER_SPEC, status: "text!" });
+    const row = parseForm(fd, { ...MEMBER_SPEC, joined_on: "date!", status: "text!" });
     await assertNoDuplicate(sb, fd, row.phone as string, id);
     const file = photoFromForm(fd);
     if (file || fd.get("remove_photo") === "on") {
@@ -331,7 +370,7 @@ export async function changePlan(membershipId: string, _: ActionState, fd: FormD
     out.id = old.member_id;
 
     const bill = await readBillForm(sb, fd, c);
-    if (bill.items.length !== 1 || bill.items[0].plan.kind !== old.kind) {
+    if (bill.items.length !== 1 || bill.items[0].kind !== old.kind) {
       throw new FormError("Choose one new plan of the same type to change to");
     }
     const start = bill.items[0].start;
@@ -343,7 +382,7 @@ export async function changePlan(membershipId: string, _: ActionState, fd: FormD
       id: old.id,
       end_date: start > old.start_date ? addDays(start, -1) : old.start_date,
       discount: cr.oldDiscount,
-      note: `Changed to ${bill.items[0].plan.name} from ${start}: charged ${money(cr.usedValue, c.currency)} for ${cr.usedDays} of ${cr.totalDays} days${
+      note: `Changed to ${bill.items[0].name} from ${start}: charged ${money(cr.usedValue, c.currency)} for ${cr.usedDays} of ${cr.totalDays} days${
         cr.credit > 0 ? `, ${money(cr.credit, c.currency)} credited` : ""
       }`,
     };
@@ -585,11 +624,12 @@ export async function sellDayPass(_: ActionState, fd: FormData): Promise<ActionS
       sb,
       memberId,
       {
-        items: [{ plan: plan as PlanRow, start: c.today, price: Number(plan.price) }],
+        items: [planItem(plan as PlanRow, c.today)],
         discountValue: Math.max(0, r2(Number(plan.price) - paid)),
         discountType: "amount",
         discountReason: paid < Number(plan.price) ? "Pass price adjusted" : null,
         paid,
+        paidOn: c.today,
         modes: [{ method: (f.method as string) ?? "upi", amount: paid }],
         reference: f.reference as string | null,
         dueOn: null,

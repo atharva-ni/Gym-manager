@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { getSettings, requireOwner } from "@/lib/auth";
+import { getSettings, requireAccess } from "@/lib/auth";
 import { todayISO } from "@/lib/format";
 import type { Plan } from "@/lib/types";
 import { Card, PageHeader } from "@/components/ui";
@@ -13,18 +13,19 @@ export const metadata = { title: "New admission · SetFit Fitness" };
 
 export default async function NewMemberPage(props: PageProps<"/members/new">) {
   const { lead: leadId } = await props.searchParams;
-  await requireOwner(); // staff are sent to check-in
+  const { role } = await requireAccess(); // owner and staff both take admissions
   const settings = await getSettings();
   const today = todayISO(settings.timezone);
   const sb = await createClient();
   const [{ data: trainers }, { data: planRows }, { data: lead }] = await Promise.all([
-    sb.from("trainers").select("id, full_name").eq("status", "active").order("full_name"),
+    sb.rpc("trainer_options"), // names only: staff can't read the trainers table
     sb.from("plans").select("*").eq("is_active", true).order("price"),
     typeof leadId === "string"
       ? sb.from("leads").select("id, full_name, phone, email, interest, notes").eq("id", leadId).maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
   const plans = (planRows ?? []) as Plan[];
+  const trainerList = (trainers ?? []) as { id: string; full_name: string }[];
   const gymPlans = plans.filter((p) => p.kind === "membership");
   const ptPlans = plans.filter((p) => p.kind === "personal_training");
 
@@ -45,7 +46,7 @@ export default async function NewMemberPage(props: PageProps<"/members/new">) {
           <div className="space-y-4">
             {lead && <input type="hidden" name="lead_id" value={lead.id} />}
             <MemberFields
-              trainers={trainers ?? []}
+              trainers={trainerList}
               today={today}
               defaults={lead ? { full_name: lead.full_name, phone: lead.phone, email: lead.email, notes: lead.notes } : undefined}
             />
@@ -60,15 +61,20 @@ export default async function NewMemberPage(props: PageProps<"/members/new">) {
             <BillFields
               plans={gymPlans}
               ptPlans={ptPlans}
-              trainers={trainers ?? []}
+              trainers={trainerList}
               currency={settings.currency}
               today={today}
               startDate={today}
               ptStartDate={today}
+              admissionFee={Number(settings.admission_fee ?? 0)}
+              maxDiscountPct={role === "staff" ? settings.staff_max_discount_pct : null}
+              layout="split"
+              submitLabel="Save admission"
             />
           )}
         </Card>
-        <div className="flex justify-end gap-2">
+        {/* On phones the bill has its own sticky Save bar */}
+        <div className={`justify-end gap-2 ${plans.length ? "hidden lg:flex" : "flex"}`}>
           <Link href="/members" className="btn-secondary">
             Cancel
           </Link>

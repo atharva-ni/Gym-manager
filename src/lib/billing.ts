@@ -93,5 +93,19 @@ export function refundSuggestion(fee: Fee, date: string) {
   return Math.max(0, Math.min(Number(fee.paid), unusedValue));
 }
 
+/**
+ * Spread one payment over several pending fees, oldest first: each fee is
+ * paid in full before the next one gets anything. Returns what goes to each
+ * fee (same order), and the total can't exceed what is owed.
+ */
+export function allocateAcrossFees(amount: number, balances: number[]) {
+  let left = r2(Math.max(0, amount));
+  return balances.map((b) => {
+    const part = r2(Math.min(left, Math.max(0, b)));
+    left = r2(left - part);
+    return part;
+  });
+}
+
 /** Last 10 digits of a mobile number, for duplicate checks (matches members.phone_digits). */
 export const phoneDigits = (phone: string | null | undefined) => (phone ?? "").replace(/\D/g, "").slice(-10);

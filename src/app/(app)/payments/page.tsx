@@ -2,7 +2,7 @@ import Link from "next/link";
 import { CalendarPlus, MessageCircle, Pencil, Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings, requireAccess } from "@/lib/auth";
-import { addDays, fmtDate, money, todayISO } from "@/lib/format";
+import { addDays, fmtDate, money, plural, todayISO } from "@/lib/format";
 import { daysLeftText } from "@/lib/member-state";
 import { label, PAYMENT_CATEGORIES, PAYMENT_METHODS } from "@/lib/constants";
 import { getPendingFees, rangeParams } from "@/lib/queries";
@@ -17,14 +17,16 @@ import { renewMembership } from "../members/actions";
 import { DateRangeFilter } from "@/components/date-range";
 import { collectPayment, updatePayment } from "./actions";
 import { PaymentEditFields } from "./payment-fields";
+import { DayClose } from "./day-close";
 
 export const metadata = { title: "Fees & Payments · SetFit Fitness" };
 
 export default async function PaymentsPage(props: PageProps<"/payments">) {
   const sp = await props.searchParams;
-  const tab = sp.tab === "dues" || sp.tab === "expiring" ? sp.tab : "collections";
+  const wanted = sp.tab === "dues" || sp.tab === "expiring" || sp.tab === "close" ? sp.tab : "collections";
   const settings = await getSettings();
   const isOwner = (await requireAccess()).role === "owner";
+  const tab = wanted === "close" && !isOwner ? "collections" : wanted; // day close is owner-only
   const { currency } = settings;
   const today = todayISO(settings.timezone);
   const { from, to } = rangeParams(sp, today);
@@ -52,7 +54,7 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
     .order("refunded_on", { ascending: false })
     .limit(500);
   if (method) refundQuery = refundQuery.eq("method", method);
-  const [{ data, count }, { data: refundRows }, fees, { data: expiringRows }] = await Promise.all([
+  const [{ data, count }, { data: refundRows }, fees, { data: expiringRows }, { data: summaryRow }] = await Promise.all([
     query,
     category && category !== "refund" ? Promise.resolve({ data: [] }) : refundQuery,
     getPendingFees(sb),
@@ -65,6 +67,8 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
         `and(membership_kind.eq.membership,membership_end.gte.${today},membership_end.lte.${soon}),and(pt_end.gte.${today},pt_end.lte.${soon})`,
       )
       .limit(500),
+    // Totals for the whole range (the list below shows at most 1,000 rows)
+    sb.rpc("payments_summary", { p_from: from, p_to: to, p_method: method || null, p_category: category || null }),
   ]);
   const payments = category === "refund" ? [] : ((data ?? []) as Payment[]);
   const refunds = (refundRows ?? []) as Refund[];
@@ -105,7 +109,7 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
     tab === "expiring" && expiring.length
       ? await Promise.all([
           sb.from("plans").select("*").eq("is_active", true).order("price"),
-          sb.from("trainers").select("id, full_name").eq("status", "active").order("full_name"),
+          sb.rpc("trainer_options"),
         ])
       : [{ data: [] }, { data: [] }];
   const activePlans = (planRows ?? []) as Plan[];
@@ -122,12 +126,12 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
   const memberById = new Map((dueMembers ?? []).map((m) => [m.id, m]));
   const dues = [...fees].sort((a, b) => (a.balance_due_on ?? "9999").localeCompare(b.balance_due_on ?? "9999"));
 
-  const refundTotal = refunds.reduce((s, r) => s + Number(r.amount), 0);
-  const gross = payments.reduce((s, p) => s + Number(p.amount), 0);
+  const summary = summaryRow as { received: number; payments: number; refunded: number; top_method: string | null; top_amount: number | null } | null;
+  const refundTotal = Number(summary?.refunded ?? refunds.reduce((s, r) => s + Number(r.amount), 0));
+  const gross = Number(summary?.received ?? payments.reduce((s, p) => s + Number(p.amount), 0));
   const total = gross - refundTotal;
-  const byMethod = new Map<string, number>();
-  for (const p of payments) byMethod.set(p.method, (byMethod.get(p.method) ?? 0) + Number(p.amount));
-  const topMethod = [...byMethod.entries()].sort((a, b) => b[1] - a[1])[0];
+  const topMethod = summary?.top_method ? ([summary.top_method, Number(summary.top_amount)] as const) : null;
+  const paymentCount = Number(summary?.payments ?? payments.length);
   const outstanding = fees.reduce((s, f) => s + f.balance, 0);
   const overdue = fees.filter((f) => f.balance_due_on && f.balance_due_on < today);
 
@@ -138,7 +142,7 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
         description="Every payment belongs to a member and is applied to their membership or PT fee. Part payments leave a balance you can collect later."
         actions={
           <FormDialog title="Collect fee" trigger={<><Plus size={16} /> Collect fee</>} action={collectPayment} submitLabel="Save payment" successMessage="Payment saved">
-            <CollectFeeFields currency={currency} today={today} canWaive={isOwner} />
+            <CollectFeeFields currency={currency} today={today} />
           </FormDialog>
         }
       />
@@ -149,7 +153,7 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
             <Stat
               label="Collected in range"
               value={money(total, currency)}
-              hint={refundTotal > 0 ? `${money(gross, currency)} received, ${money(refundTotal, currency)} refunded` : `${payments.length} payments`}
+              hint={refundTotal > 0 ? `${money(gross, currency)} received, ${money(refundTotal, currency)} refunded` : plural(paymentCount, "payment")}
             />
             <Stat
               label={topMethod ? `Via ${label(topMethod[0])}` : "Top method"}
@@ -158,7 +162,7 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
             />
           </>
         )}
-        <Stat label="Pending dues" value={money(outstanding, currency)} hint={`${dueMemberIds.length} members`} tone="warn" href="/payments?tab=dues" />
+        <Stat label="Pending dues" value={money(outstanding, currency)} hint={plural(dueMemberIds.length, "member")} tone="warn" href="/payments?tab=dues" />
         <Stat label="Overdue" value={overdue.length} hint="Past the promised date" tone={overdue.length ? "bad" : "neutral"} href="/payments?tab=dues" />
       </div>
 
@@ -168,10 +172,18 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
           { key: "collections", label: "Collections", href: "/payments" },
           { key: "dues", label: `Pending dues (${fees.length})`, href: "/payments?tab=dues" },
           { key: "expiring", label: `Expiring soon (${expiring.length})`, href: "/payments?tab=expiring" },
+          ...(isOwner ? [{ key: "close", label: "Day close", href: "/payments?tab=close" }] : []),
         ]}
       />
 
-      {tab === "expiring" ? (
+      {tab === "close" ? (
+        <DayClose
+          day={typeof sp.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) && sp.date <= today ? sp.date : today}
+          today={today}
+          currency={currency}
+          timezone={settings.timezone}
+        />
+      ) : tab === "expiring" ? (
         <Card
           bodyClass=""
           title={`Ending in the next ${settings.expiry_alert_days} days and not renewed yet`}
@@ -225,40 +237,40 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
                                 <MessageCircle size={14} /> Remind
                               </a>
                             )}
-                            {isOwner && (
-                              <FormDialog
-                                title={`${isPT ? "Renew PT" : "Renew"}: ${m.full_name}`}
-                                trigger={<><CalendarPlus size={14} /> Renew</>}
-                                triggerClass="btn-secondary btn-sm"
-                                action={renewMembership.bind(null, m.id)}
-                                submitLabel="Save bill"
-                                successMessage="Renewed"
-                                wide
-                              >
-                                {(isPT ? ptPlans.length && trainers.length : gymPlans.length) ? (
-                                  <BillFields
-                                    ptOnly={isPT}
-                                    plans={isPT ? [] : gymPlans}
-                                    ptPlans={trainers.length ? ptPlans : []}
-                                    trainers={trainers}
-                                    currency={currency}
-                                    today={today}
-                                    startDate={startFrom}
-                                    ptStartDate={startFrom}
-                                    defaultTrainerId={m.trainer_id}
-                                    chargeAdmission={false}
-                                  />
-                                ) : (
-                                  <p className="text-sm text-muted">
-                                    {isPT ? "No active PT packages or trainers." : "No active membership plans."} Set them up on the{" "}
-                                    <Link href={isPT && ptPlans.length ? "/trainers" : "/plans"} className="text-brand underline">
-                                      {isPT && ptPlans.length ? "Staff" : "Plans"} page
-                                    </Link>
-                                    .
-                                  </p>
-                                )}
-                              </FormDialog>
-                            )}
+                            <FormDialog
+                              title={`${isPT ? "Renew PT" : "Renew"}: ${m.full_name}`}
+                              trigger={<><CalendarPlus size={14} /> Renew</>}
+                              triggerClass="btn-secondary btn-sm"
+                              action={renewMembership.bind(null, m.id)}
+                              submitLabel="Save bill"
+                              successMessage="Renewed"
+                              wide="xl"
+                            >
+                              {(isPT ? ptPlans.length && trainers.length : gymPlans.length) ? (
+                                <BillFields
+                                  layout="split"
+                                  ptOnly={isPT}
+                                  plans={isPT ? [] : gymPlans}
+                                  ptPlans={trainers.length ? ptPlans : []}
+                                  trainers={trainers}
+                                  currency={currency}
+                                  today={today}
+                                  startDate={startFrom}
+                                  ptStartDate={startFrom}
+                                  defaultTrainerId={m.trainer_id}
+                                  chargeAdmission={false}
+                                  maxDiscountPct={isOwner ? null : settings.staff_max_discount_pct}
+                                />
+                              ) : (
+                                <p className="text-sm text-muted">
+                                  {isPT ? "No active PT packages or trainers." : "No active membership plans."} Set them up on the{" "}
+                                  <Link href={isPT && ptPlans.length ? "/trainers" : "/plans"} className="text-brand underline">
+                                    {isPT && ptPlans.length ? "Staff" : "Plans"} page
+                                  </Link>
+                                  .
+                                </p>
+                              )}
+                            </FormDialog>
                           </div>
                         </td>
                       </tr>
@@ -336,7 +348,6 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
                                 defaultFeeId={f.id}
                                 currency={currency}
                                 today={today}
-                                canWaive={isOwner}
                               />
                             </FormDialog>
                           </div>
@@ -383,7 +394,7 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
             {!entries.length ? (
               <Empty>No payments in this period.</Empty>
             ) : (
-              <TableWrap>
+              <TableWrap compact>
                 <table className="tbl">
                   <thead>
                     <tr>
@@ -453,7 +464,7 @@ export default async function PaymentsPage(props: PageProps<"/payments">) {
                               </Link>
                               {isOwner && (
                                 <>
-                                  <FormDialog title="Edit payment" trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={updatePayment} successMessage="Payment updated">
+                                  <FormDialog title="Edit payment" trigger={<><Pencil size={14} /><span className="sm:sr-only">Edit</span></>} triggerClass="btn-ghost btn-sm" action={updatePayment} successMessage="Payment updated">
                                     <PaymentEditFields payment={e.p} today={today} />
                                   </FormDialog>
                                   <VoidButton

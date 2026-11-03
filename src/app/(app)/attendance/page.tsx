@@ -1,16 +1,16 @@
 import Link from "next/link";
 import Form from "next/form";
-import { ChevronLeft, ChevronRight, LogIn, LogOut, Ticket, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, LogOut, Ticket, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings, requireAccess } from "@/lib/auth";
 import { photoUrls } from "@/lib/photos";
-import { addDays, dayBoundsUTC, fmtDate, fmtTime, INSIDE_HOURS, insideSince, todayISO } from "@/lib/format";
+import { INSIDE_HOURS, addDays, dayBoundsUTC, fmtDate, fmtTime, insideSince, plural, todayISO } from "@/lib/format";
 import type { Attendance } from "@/lib/types";
 import { Avatar, Badge, Card, Empty, PageHeader, Stat, TableWrap } from "@/components/ui";
-import { ActionButton, ActionForm, FormDialog, SubmitButton } from "@/components/forms";
+import { ActionButton, FormDialog } from "@/components/forms";
 import { DayPassFields } from "@/components/day-pass-fields";
 import { sellDayPass } from "../members/actions";
-import { MemberSelect } from "@/components/member-select";
+import { CheckInCard } from "@/components/check-in-card";
 import { SimpleBarChart } from "@/components/charts";
 import { deleteRecord } from "@/app/actions";
 import { checkInForm, checkOut, checkOutAll } from "./actions";
@@ -70,45 +70,38 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label={isToday ? "Check-ins today" : `Check-ins ${fmtDate(date)}`} value={visits.length} />
         <Stat label="Currently inside" value={isToday ? inside.length : "-"} hint={isToday ? `Open check-ins from the last ${INSIDE_HOURS} hours` : undefined} tone="good" />
-        <Stat label="Avg. session" value={avgMins ? `${Math.floor(avgMins / 60)}h ${avgMins % 60}m` : "-"} hint="Checked-out visits" />
+        <Stat label="Avg. session" value={avgMins ? `${Math.floor(avgMins / 60)}h ${avgMins % 60}m` : "-"} hint={avgMins ? "Checked-out visits" : "Shows after check-outs"} />
         <Stat
           label="Peak hour (30 days)"
           value={visits30 ? `${((peak + 11) % 12) + 1}${peak < 12 ? " AM" : " PM"}` : "-"}
-          hint={`${visits30} visits in 30 days`}
+          hint={`${plural(visits30, "visit")} in 30 days`}
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-6 lg:grid-cols-3 lg:items-start">
         <div className="space-y-6">
           <Card title="Quick check-in">
-            <ActionForm action={checkInForm} resetOnSuccess>
-              <MemberSelect required />
-              <SubmitButton className="btn-primary w-full">
-                <LogIn size={16} /> Check in
-              </SubmitButton>
-            </ActionForm>
+            <CheckInCard action={checkInForm} currency={settings.currency} />
           </Card>
-          {isOwner && (
-            <Card title="Walk-in visitor">
-              <p className="mb-3 text-sm text-muted">Sell a day pass or trial to someone who isn’t a member yet.</p>
-              <FormDialog
-                title="Day pass / trial"
-                trigger={<><Ticket size={16} /> Sell day pass / trial</>}
-                triggerClass="btn-secondary w-full"
-                action={sellDayPass}
-                submitLabel="Save"
-                successMessage="Day pass sold"
-              >
-                {passRows?.length ? (
-                  <DayPassFields passes={passRows} currency={settings.currency} />
-                ) : (
-                  <p className="text-sm text-muted">
-                    First add a pass on the <Link href="/plans" className="text-brand underline">Plans page</Link> (type “Day pass / trial”, e.g. 1 day for ₹200).
-                  </p>
-                )}
-              </FormDialog>
-            </Card>
-          )}
+          <Card title="Walk-in visitor">
+            <p className="mb-3 text-sm text-muted">Sell a day pass or trial to someone who isn’t a member yet.</p>
+            <FormDialog
+              title="Day pass / trial"
+              trigger={<><Ticket size={16} /> Sell day pass / trial</>}
+              triggerClass="btn-secondary w-full"
+              action={sellDayPass}
+              submitLabel="Save"
+              successMessage="Day pass sold"
+            >
+              {passRows?.length ? (
+                <DayPassFields passes={passRows} currency={settings.currency} />
+              ) : (
+                <p className="text-sm text-muted">
+                  First add a pass on the <Link href="/plans" className="text-brand underline">Plans page</Link> (type “Day pass / trial”, e.g. 1 day for ₹200).
+                </p>
+              )}
+            </FormDialog>
+          </Card>
           <Card title="Busiest hours · last 30 days">
             {hourData.length ? (
               <SimpleBarChart data={hourData} name="Check-ins" height={220} />
@@ -127,7 +120,11 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
                 <ChevronLeft size={16} />
               </Link>
               {isToday ? "Today" : fmtDate(date)}
-              {!isToday && (
+              {isToday ? (
+                <span className="btn-ghost btn-sm pointer-events-none opacity-30" aria-hidden>
+                  <ChevronRight size={16} />
+                </span>
+              ) : (
                 <Link className="btn-ghost btn-sm" href={`/attendance?date=${addDays(date, 1)}`} aria-label="Next day">
                   <ChevronRight size={16} />
                 </Link>
@@ -147,14 +144,14 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
                 </ActionButton>
               )}
             <Form action="/attendance" className="flex items-center gap-2">
-              <input type="date" name="date" defaultValue={date} max={today} className="input w-auto py-1" />
-              <button className="btn-secondary btn-sm">Go</button>
+              <input type="date" name="date" defaultValue={date} max={today} className="input w-auto" />
+              <button className="btn-secondary">Go</button>
             </Form>
             </div>
           }
         >
           {!visits.length ? (
-            <Empty>No check-ins on this day.</Empty>
+            <Empty>{isToday ? "No check-ins yet today. Use Quick check-in on the left." : "No check-ins on this day."}</Empty>
           ) : (
             <TableWrap>
               <table className="tbl">
@@ -202,6 +199,7 @@ export default async function AttendancePage(props: PageProps<"/attendance">) {
                           {isOwner && (
                             <ActionButton action={deleteRecord.bind(null, "attendance", v.id)} confirmLabel="Remove check-in" confirmText={`Remove ${v.members?.full_name ?? "this member"}'s check-in at ${fmtTime(v.check_in, tz)}?`} successMessage="Check-in removed">
                               <Trash2 size={14} />
+                              <span className="sm:sr-only">Delete</span>
                             </ActionButton>
                           )}
                         </div>

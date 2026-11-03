@@ -7,8 +7,10 @@ import { useLayoutEffect, useRef, type ReactNode } from "react";
  * the CSS turns each row into a stacked card, and this copies the column
  * header text onto each cell (`data-label`) so the card shows what each
  * value is. Rows added later (filters, new data) are labelled too.
+ * `compact`: phones show each row as two short lines instead (see
+ * .tbl-compact in globals.css), for long lists like payments.
  */
-export function TableWrap({ children }: { children: ReactNode }) {
+export function TableWrap({ children, compact }: { children: ReactNode; compact?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -36,7 +38,7 @@ export function TableWrap({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div ref={ref} className="tbl-wrap overflow-x-auto">
+    <div ref={ref} className={`tbl-wrap overflow-x-auto ${compact ? "tbl-compact" : ""}`}>
       {children}
     </div>
   );

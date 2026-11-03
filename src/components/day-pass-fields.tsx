@@ -4,8 +4,9 @@ import { useState, useTransition } from "react";
 import { membersWithPhone } from "@/app/actions";
 import { label, PAYMENT_METHODS } from "@/lib/constants";
 import { money } from "@/lib/format";
+import { durationLabel } from "@/lib/plans";
 
-type Pass = { id: string; name: string; price: number; duration_days: number };
+type Pass = { id: string; name: string; price: number; duration_days: number; duration_months?: number | null };
 
 /**
  * Sell a day pass / trial. The mobile number is looked up first: a returning
@@ -73,7 +74,7 @@ export function DayPassFields({ passes, currency }: { passes: Pass[]; currency: 
           >
             {passes.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name} · {money(p.price, currency)} / {p.duration_days}d
+                {p.name} ({durationLabel({ duration_months: p.duration_months ?? null, duration_days: p.duration_days })}) · {money(p.price, currency)}
               </option>
             ))}
           </select>

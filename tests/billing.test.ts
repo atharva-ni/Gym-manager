@@ -1,7 +1,8 @@
 // Unit tests for the billing maths (runs on Node's built-in TypeScript support).
 import { test } from "node:test";
+import { money, plural } from "../src/lib/format.ts";
 import assert from "node:assert/strict";
-import { allocatePayments, daysInclusive, phoneDigits, planChangeCredit, refundSuggestion, split } from "../src/lib/billing.ts";
+import { allocateAcrossFees, allocatePayments, daysInclusive, phoneDigits, planChangeCredit, refundSuggestion, split } from "../src/lib/billing.ts";
 
 test("split keeps the total exact", () => {
   assert.deepEqual(split(800, [2000, 6000]), [200, 600]);
@@ -56,4 +57,20 @@ test("refundSuggestion refunds the paid share of unused days", () => {
 
 test("phoneDigits normalises Indian mobile formats", () => {
   for (const p of ["+91 98765 43210", "098765-43210", "9876543210"]) assert.equal(phoneDigits(p), "9876543210");
+});
+
+test("allocateAcrossFees pays the oldest fee first", () => {
+  assert.deepEqual(allocateAcrossFees(2500, [1500, 2000, 500]), [1500, 1000, 0]);
+  assert.deepEqual(allocateAcrossFees(4000, [1500, 2000, 500]), [1500, 2000, 500]);
+  assert.deepEqual(allocateAcrossFees(9999, [100.5, 200.25]), [100.5, 200.25], "never more than owed");
+  assert.deepEqual(allocateAcrossFees(0, [100]), [0]);
+});
+
+test("money drops paise for whole rupees; plural fits the count", () => {
+  assert.equal(money(3000), "₹3,000");
+  assert.equal(money(100500), "₹1,00,500");
+  assert.equal(money(1333.5), "₹1,333.50");
+  assert.equal(plural(1, "payment"), "1 payment");
+  assert.equal(plural(3, "payment"), "3 payments");
+  assert.equal(plural(2, "entry", "entries"), "2 entries");
 });

@@ -89,7 +89,7 @@ export default async function LeadsPage(props: PageProps<"/leads">) {
           <Stat label="Open leads" value={openCount} hint={`${counts.new} new · ${counts.contacted} contacted · ${counts.trial} on trial`} />
           <Stat label="Follow-ups due" value={dueCount} tone={dueCount ? "warn" : "neutral"} href="/leads?view=due" hint="Today or overdue" />
           <Stat label="Converted" value={counts.converted} tone="good" />
-          <Stat label="Conversion rate" value={`${conversion}%`} hint="Converted ÷ closed leads" />
+          <Stat label="Conversion rate" value={closed ? `${conversion}%` : "-"} hint={closed ? "Converted ÷ closed leads" : "No closed leads yet"} />
         </div>
         <Card title="Where leads come from">
           {bySource.length ? <SimpleBarChart data={bySource} name="Leads" horizontal height={Math.max(140, bySource.length * 32)} /> : <Empty>No leads yet.</Empty>}
@@ -171,7 +171,7 @@ export default async function LeadsPage(props: PageProps<"/leads">) {
                             </Link>
                           )
                         )}
-                        <FormDialog title="Edit lead" trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={saveLead}>
+                        <FormDialog title="Edit lead" trigger={<><Pencil size={14} /><span className="sm:sr-only">Edit</span></>} triggerClass="btn-ghost btn-sm" action={saveLead}>
                           <LeadFields l={l} today={today} />
                         </FormDialog>
                         <ActionButton
@@ -181,6 +181,7 @@ export default async function LeadsPage(props: PageProps<"/leads">) {
                           successMessage="Lead deleted"
                         >
                           <Trash2 size={14} />
+                          <span className="sm:sr-only">Delete</span>
                         </ActionButton>
                       </div>
                     </td>

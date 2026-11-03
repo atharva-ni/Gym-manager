@@ -19,3 +19,8 @@ export const label = (v: string | null | undefined) =>
   v ? (LABELS[v] ?? v.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())) : "-";
 
 export const options = (values: readonly string[]) => values.map((v) => ({ value: v, label: label(v) }));
+
+/** What a staff login can and can't do (kept in step with staff_limits in schema.sql). */
+export const STAFF_CAN =
+  "Staff can check members in and out, take admissions, renew, add PT, log PT sessions, sell day passes, collect fees and give discounts.";
+export const STAFF_CANNOT = "They can't see reports, expenses or salaries, or freeze, refund, void or delete.";

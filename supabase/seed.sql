@@ -14,6 +14,8 @@ declare
   ms_id uuid;
   plan record;
   start_d date;
+  end_d date;
+  label text;
   i int;
   names text[] := array[
     'Aarav Sharma','Priya Patel','Rohan Gupta','Sneha Reddy','Arjun Nair','Kavya Iyer','Vikas Yadav','Ananya Singh',
@@ -33,23 +35,27 @@ begin
     raise exception 'No users found. Create your owner account first (Authentication > Users).';
   end if;
 
-  insert into public.gym_settings (owner_id, gym_name, phone, email, address, currency, timezone, tax_rate)
+  insert into public.gym_settings (owner_id, gym_name, phone, email, address, currency, timezone, tax_rate, admission_fee)
   values (uid, 'SetFit Fitness', '+91 88559 98620', null,
-          'Beside The Tree House High School, DP Road, Karvenagar, Pune, Maharashtra 411052', 'INR', 'Asia/Kolkata', 18)
+          'Beside The Tree House High School, DP Road, Karvenagar, Pune, Maharashtra 411052', 'INR', 'Asia/Kolkata', 18, 500)
   on conflict (owner_id) do nothing;
 
-  insert into public.plans (owner_id, name, duration_days, price, admission_fee, description)
-    values (uid, 'Monthly', 30, 1500, 500, 'Full gym access, locker') returning id into p_monthly;
-  insert into public.plans (owner_id, name, duration_days, price, admission_fee, description)
-    values (uid, 'Quarterly', 90, 4000, 500, 'Full gym access + 1 PT intro session') returning id into p_quarter;
-  insert into public.plans (owner_id, name, duration_days, price, admission_fee, description)
-    values (uid, 'Half-yearly', 180, 7500, 0, 'Full gym access + group classes') returning id into p_half;
-  insert into public.plans (owner_id, name, duration_days, price, admission_fee, description)
-    values (uid, 'Annual', 365, 13000, 0, 'Everything included, 2 guest passes per month') returning id into p_annual;
-  insert into public.plans (owner_id, name, kind, sessions, duration_days, price, description)
-    values (uid, 'PT 12 sessions', 'personal_training', 12, 30, 6000, 'One-on-one training, 3 sessions a week') returning id into p_pt;
-  insert into public.plans (owner_id, name, kind, sessions, duration_days, price, description)
-    values (uid, 'PT 36 sessions', 'personal_training', 36, 90, 15000, 'Three months of one-on-one coaching + diet plan') returning id into p_pt3;
+  -- Plans with durations: each plan (Silver, Gold, PT) has one row per duration
+  insert into public.plans (owner_id, name, duration_months, duration_days, price, description)
+    values (uid, 'Silver', 1, 30, 1500, 'Full gym access, locker') returning id into p_monthly;
+  insert into public.plans (owner_id, name, duration_months, duration_days, price, description)
+    values (uid, 'Silver', 3, 90, 4000, 'Full gym access, locker') returning id into p_quarter;
+  insert into public.plans (owner_id, name, duration_months, duration_days, price, description)
+    values (uid, 'Silver', 6, 180, 7500, 'Full gym access, locker') returning id into p_half;
+  insert into public.plans (owner_id, name, duration_months, duration_days, price, description)
+    values (uid, 'Silver', 12, 360, 13000, 'Full gym access, locker') returning id into p_annual;
+  insert into public.plans (owner_id, name, duration_months, duration_days, price, description) values
+    (uid, 'Gold', 1, 30, 2200, 'Gym, group classes, steam'),
+    (uid, 'Gold', 12, 360, 20000, 'Gym, group classes, steam');
+  insert into public.plans (owner_id, name, kind, sessions, duration_months, duration_days, price, description)
+    values (uid, 'PT 12 sessions / month', 'personal_training', 12, 1, 30, 6000, 'One-on-one training, 3 sessions a week') returning id into p_pt;
+  insert into public.plans (owner_id, name, kind, sessions, duration_months, duration_days, price, description)
+    values (uid, 'PT 12 sessions / month', 'personal_training', 36, 3, 90, 15000, 'One-on-one training, 3 sessions a week') returning id into p_pt3;
   insert into public.plans (owner_id, name, kind, duration_days, price, description) values
     (uid, 'Day pass', 'pass', 1, 200, 'Single visit, full gym access'),
     (uid, 'Trial week', 'pass', 7, 700, 'Seven days to try the gym');
@@ -82,24 +88,32 @@ begin
     select * into plan from public.plans
      where id = (array[p_monthly, p_monthly, p_quarter, p_half, p_annual])[1 + (abs(hashtext(m.full_name)) % 5)];
     start_d := m.joined_on;
+    label := case plan.duration_months when 1 then '1 month' when 12 then '1 year' else plan.duration_months || ' months' end;
+
+    -- One-time admission fee, its own line on the first bill
+    insert into public.memberships (owner_id, member_id, plan_name, kind, start_date, end_date, price)
+    values (uid, m.id, 'Admission fee', 'charge', start_d, start_d, 500) returning id into ms_id;
+    insert into public.payments (owner_id, member_id, membership_id, amount, method, category, paid_on)
+    values (uid, m.id, ms_id, 500, 'upi', 'other', start_d);
+
     -- Keep renewing until the membership reaches the near future (some lapse)
     loop
+      end_d := (start_d + make_interval(months => plan.duration_months))::date - 1;
       insert into public.memberships (owner_id, member_id, plan_id, plan_name, start_date, end_date, price, discount)
-      values (uid, m.id, plan.id, plan.name, start_d, start_d + plan.duration_days - 1,
-              plan.price + case when start_d = m.joined_on then plan.admission_fee else 0 end,
+      values (uid, m.id, plan.id, plan.name || ' · ' || label, start_d, end_d, plan.price,
               case when abs(hashtext(m.full_name)) % 7 = 0 then 300 else 0 end)
       returning id into ms_id;
 
       -- Most pay in full; every 6th member leaves a balance on the latest plan
       insert into public.payments (owner_id, member_id, membership_id, amount, method, category, paid_on)
       select uid, m.id, ms_id,
-             case when abs(hashtext(m.full_name)) % 6 = 0 and start_d + plan.duration_days > current_date
+             case when abs(hashtext(m.full_name)) % 6 = 0 and end_d >= current_date
                   then round((x.price - x.discount) / 2, 2) else x.price - x.discount end,
              (array['upi','upi','cash','card'])[1 + (abs(hashtext(m.full_name || start_d)) % 4)],
              'membership', least(start_d, current_date)
         from public.memberships x where x.id = ms_id;
 
-      start_d := start_d + plan.duration_days;
+      start_d := end_d + 1;
       exit when start_d > current_date or abs(hashtext(m.full_name || start_d)) % 5 = 0;
     end loop;
   end loop;
@@ -113,9 +127,9 @@ begin
     start_d := current_date - (abs(hashtext(m.full_name)) % 20);
     insert into public.memberships (owner_id, member_id, plan_id, plan_name, kind, trainer_id, sessions_total, sessions_used,
                                     start_date, end_date, price, balance_due_on)
-    values (uid, m.id, p_pt, 'PT 12 sessions', 'personal_training',
+    values (uid, m.id, p_pt, 'PT 12 sessions / month · 1 month', 'personal_training',
             (array[t1, t2, t3])[1 + abs(hashtext(m.full_name)) % 3], 12, (current_date - start_d) / 3,
-            start_d, start_d + 29, 6000,
+            start_d, (start_d + interval '1 month')::date - 1, 6000,
             case when abs(hashtext(m.full_name)) % 2 = 0 then start_d + 10 end)
     returning id into ms_id;
     insert into public.payments (owner_id, member_id, membership_id, amount, method, category, paid_on)

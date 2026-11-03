@@ -2,13 +2,13 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import {
-  ArrowLeft, CalendarPlus, CreditCard, Dumbbell, History, LogIn, LogOut, MessageCircle, Minus, Pause, Pencil, Play, Plus, Printer, Ruler,
+  ArrowLeft, CalendarPlus, CreditCard, Dumbbell, History, LogIn, LogOut, MessageCircle, Minus, Pause, Pencil, Phone, Play, Plus, Printer, Ruler,
   Send, Trash2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings, requireAccess } from "@/lib/auth";
 import { photoUrls } from "@/lib/photos";
-import { addDays, age, dayBoundsUTC, fmtDate, fmtDateTime, insideSince, money, monthStart, todayISO } from "@/lib/format";
+import { addDays, age, dayBoundsUTC, fmtDate, fmtDateTime, insideSince, money, monthStart, plural, todayISO } from "@/lib/format";
 import { daysLeftText, isFrozen, membershipState } from "@/lib/member-state";
 import { refundSuggestion } from "@/lib/billing";
 import { label, options, PAYMENT_METHODS } from "@/lib/constants";
@@ -19,6 +19,7 @@ import { siteUrl } from "@/lib/site";
 import { Avatar, Badge, Card, Empty, Stat, StatusBadge, TableWrap, Tabs } from "@/components/ui";
 import { ActionButton, FormDialog, ViewDialog } from "@/components/forms";
 import { VoidButton } from "@/components/void-button";
+import { RowMenu } from "@/components/row-menu";
 import { MemberSelect } from "@/components/member-select";
 import { Checkbox, Field, Grid, Hidden, SelectField, TextArea } from "@/components/fields";
 import { TrendLine } from "@/components/charts";
@@ -63,7 +64,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
     sb.from("attendance").select("*").eq("member_id", id).order("check_in", { ascending: false }).limit(60),
     sb.from("measurements").select("*").eq("member_id", id).order("measured_on"),
     sb.from("plans").select("*").eq("is_active", true).order("price"),
-    sb.from("trainers").select("id, full_name, status").order("full_name"),
+    isOwner ? sb.from("trainers").select("id, full_name, status").order("full_name") : sb.rpc("trainer_options"),
     sb
       .from("attendance")
       .select("id", { count: "exact", head: true })
@@ -88,8 +89,10 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
   const plans = (plansRes.data ?? []) as Plan[];
   const gymPlans = plans.filter((p) => p.kind === "membership");
   const ptPlans = plans.filter((p) => p.kind === "personal_training");
-  const allTrainers = trainersRes.data ?? [];
-  const trainers = allTrainers.filter((t) => t.status === "active");
+  const allTrainers = (trainersRes.data ?? []) as { id: string; full_name: string; status?: string }[];
+  const trainers = allTrainers.filter((t) => (t.status ?? "active") === "active");
+  // Staff discounts are capped in Settings (the database enforces it too)
+  const maxDiscountPct = isOwner ? null : settings.staff_max_discount_pct;
   const trainerName = new Map(allTrainers.map((t) => [t.id, t.full_name]));
 
   const state = membershipState(m, today, settings.expiry_alert_days);
@@ -101,7 +104,9 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
     waLink(m.phone, `Hi ${m.full_name}, here is your receipt${no ? ` ${no}` : ""} from ${settings.gym_name}: ${site}/r/${token}`);
   const renewFrom = m.membership_end && m.membership_end >= today ? addDays(m.membership_end, 1) : today;
   const ptFrom = m.pt_end && m.pt_end >= today ? addDays(m.pt_end, 1) : today;
-  const totalPaid = payments.reduce((s, p) => s + Number(p.amount), 0) - refunds.reduce((s, r) => s + Number(r.amount), 0);
+  // Every plan's paid amount net of refunds, plus payments not tied to a plan
+  const totalPaid =
+    memberships.reduce((s, x) => s + Number(x.paid), 0) + payments.filter((p) => !p.membership_id).reduce((s, p) => s + Number(p.amount), 0);
   const history = [
     ...payments.map((p) => ({ kind: "payment" as const, date: p.paid_on, p })),
     ...refunds.map((r) => ({ kind: "refund" as const, date: r.refunded_on, r })),
@@ -118,7 +123,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
 
   const collectDialog = (trigger: ReactNode, triggerClass: string) => (
     <FormDialog title="Collect fee" trigger={trigger} triggerClass={triggerClass} action={collectPayment} submitLabel="Save payment" successMessage="Payment saved">
-      <CollectFeeFields memberId={m.id} fees={fees} currency={currency} today={today} canWaive={isOwner} />
+      <CollectFeeFields memberId={m.id} fees={fees} currency={currency} today={today} />
     </FormDialog>
   );
 
@@ -171,70 +176,72 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
               <LogIn size={16} /> Check in
             </ActionButton>
           )}
-          {isOwner && (
-            <>
-            <FormDialog
-              title="Add personal training"
-              trigger={<><Dumbbell size={16} /> Add PT</>}
-              triggerClass="btn-secondary"
-              action={renewMembership.bind(null, m.id)}
-              submitLabel="Save PT bill"
-              successMessage="Personal training added"
-              wide
-            >
-              {ptPlans.length && trainers.length ? (
-                <BillFields
-                  ptOnly
-                  plans={[]}
-                  ptPlans={ptPlans}
-                  trainers={trainers}
-                  currency={currency}
-                  today={today}
-                  startDate={today}
-                  ptStartDate={ptFrom}
-                  defaultTrainerId={m.trainer_id}
-                />
-              ) : (
-                <p className="text-sm text-muted">
-                  {ptPlans.length ? (
-                    <>Add a trainer on the <Link href="/trainers" className="text-brand underline">Staff page</Link> first.</>
-                  ) : (
-                    <>Create a personal training package on the <Link href="/plans" className="text-brand underline">Plans page</Link> first (e.g. 12 sessions in 30 days).</>
-                  )}
-                </p>
-              )}
-            </FormDialog>
-            <FormDialog
-              title="Renew / add plan"
-              trigger={<><CalendarPlus size={16} /> Renew / add plan</>}
-              action={renewMembership.bind(null, m.id)}
-              submitLabel="Save bill"
-              successMessage="Bill saved"
-              wide
-            >
-              {gymPlans.length || ptPlans.length ? (
-                <BillFields
-                  plans={gymPlans}
-                  ptPlans={trainers.length ? ptPlans : []}
-                  trainers={trainers}
-                  currency={currency}
-                  today={today}
-                  startDate={renewFrom}
-                  ptStartDate={ptFrom}
-                  defaultTrainerId={m.trainer_id}
-                  chargeAdmission={isNewMember}
-                />
-              ) : (
-                <p className="text-sm text-muted">
-                  Create a plan first on the <Link href="/plans" className="text-brand underline">Plans page</Link>.
-                </p>
-              )}
-            </FormDialog>
-            <FormDialog title="Edit member" trigger={<Pencil size={16} />} triggerClass="btn-secondary" action={updateMember} successMessage="Member updated" wide>
-              <MemberFields member={m} trainers={trainers} today={today} photoUrl={photoUrl} />
-            </FormDialog>
-            </>
-          )}
+          <FormDialog
+            title="Add personal training"
+            trigger={<><Dumbbell size={16} /> Add PT</>}
+            triggerClass="btn-secondary"
+            action={renewMembership.bind(null, m.id)}
+            submitLabel="Save PT bill"
+            successMessage="Personal training added"
+            wide="xl"
+          >
+            {ptPlans.length && trainers.length ? (
+              <BillFields
+                layout="split"
+                ptOnly
+                maxDiscountPct={maxDiscountPct}
+                plans={[]}
+                ptPlans={ptPlans}
+                trainers={trainers}
+                currency={currency}
+                today={today}
+                startDate={today}
+                ptStartDate={ptFrom}
+                defaultTrainerId={m.trainer_id}
+              />
+            ) : (
+              <p className="text-sm text-muted">
+                {ptPlans.length ? (
+                  <>Add a trainer on the <Link href="/trainers" className="text-brand underline">Staff page</Link> first.</>
+                ) : (
+                  <>Create a personal training package on the <Link href="/plans" className="text-brand underline">Plans page</Link> first (e.g. 12 sessions in 30 days).</>
+                )}
+              </p>
+            )}
+          </FormDialog>
+          <FormDialog
+            title="Renew / add plan"
+            trigger={<><CalendarPlus size={16} /> Renew / add plan</>}
+            action={renewMembership.bind(null, m.id)}
+            submitLabel="Save bill"
+            successMessage="Bill saved"
+            wide="xl"
+          >
+            {gymPlans.length || ptPlans.length ? (
+              <BillFields
+                layout="split"
+                plans={gymPlans}
+                ptPlans={trainers.length ? ptPlans : []}
+                trainers={trainers}
+                currency={currency}
+                today={today}
+                startDate={renewFrom}
+                ptStartDate={ptFrom}
+                defaultTrainerId={m.trainer_id}
+                chargeAdmission={isNewMember}
+                admissionFee={Number(settings.admission_fee ?? 0)}
+                maxDiscountPct={maxDiscountPct}
+              />
+            ) : (
+              <p className="text-sm text-muted">
+                Create a plan first on the <Link href="/plans" className="text-brand underline">Plans page</Link>.
+              </p>
+            )}
+          </FormDialog>
+          <FormDialog title="Edit member" trigger={<><Pencil size={16} /> Edit</>} triggerClass="btn-secondary" action={updateMember} successMessage="Member updated" wide>
+            <MemberFields member={m} trainers={trainers} today={today} photoUrl={photoUrl} />
+          </FormDialog>
+
         </div>
       </div>
 
@@ -324,13 +331,30 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
         <Card title="Profile" className="h-fit">
           <dl className="space-y-3 text-sm">
             {[
-              ["Mobile", m.phone],
+              [
+                "Mobile",
+                m.phone && (
+                  <span className="block">
+                    {m.phone}
+                    <span className="mt-1.5 flex gap-2">
+                      <a href={`tel:${m.phone}`} className="btn-secondary btn-sm">
+                        <Phone size={13} /> Call
+                      </a>
+                      {waLink(m.phone, `Hi ${m.full_name}`) && (
+                        <a href={waLink(m.phone, `Hi ${m.full_name}`)!} target="_blank" rel="noreferrer" className="btn-secondary btn-sm text-good">
+                          <MessageCircle size={13} /> WhatsApp
+                        </a>
+                      )}
+                    </span>
+                  </span>
+                ),
+              ],
               ["Email", m.email],
               ["Gender", m.gender && label(m.gender)],
               ["Date of birth", m.date_of_birth && `${fmtDate(m.date_of_birth)}${memberAge !== null ? ` (${memberAge} yrs)` : ""}`],
               ["Joined", fmtDate(m.joined_on)],
               ["Floor trainer", m.trainer_name],
-              ["Account", label(m.status)],
+              ...(m.status === "active" ? [] : [["Account", label(m.status)]]),
               ["Lifetime paid", money(totalPaid, currency)],
               ["Address", m.address],
               ["Emergency contact", [m.emergency_name, m.emergency_phone].filter(Boolean).join(" · ")],
@@ -390,7 +414,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                     const net = Number(x.price) - Number(x.discount);
                     const owes = Number(x.balance) > 0;
                     const sessionsLeft = x.sessions_total ? x.sessions_total - x.sessions_used : null;
-                    const canLog = isOwner && isPT && s === "active" && (sessionsLeft === null || sessionsLeft > 0);
+                    const canLog = isPT && s === "active" && (sessionsLeft === null || sessionsLeft > 0);
                     return (
                       <li key={x.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0 space-y-1">
@@ -492,7 +516,8 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                             <p className={`text-xs ${x.balance_due_on < today ? "text-bad" : "text-muted"}`}>by {fmtDate(x.balance_due_on)}</p>
                           )}
                           {isOwner && (
-                            <div className="flex flex-wrap gap-1 sm:justify-end">
+                            <div className="flex sm:justify-end">
+                            <RowMenu label="Manage">
                               {s !== "cancelled" && x.end_date >= today && x.kind !== "pass" && !isCharge && !freezesOf(x.id).some((f) => f.end_date >= today) && (
                                 <FormDialog
                                   title={isPT ? "Freeze PT package" : "Freeze membership"}
@@ -526,9 +551,10 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                                   action={changePlan.bind(null, x.id)}
                                   submitLabel="Change plan"
                                   successMessage="Plan changed"
-                                  wide
+                                  wide="xl"
                                 >
                                   <BillFields
+                                    layout="split"
                                     ptOnly={isPT}
                                     plans={isPT ? [] : gymPlans.filter((p) => p.id !== x.plan_id)}
                                     ptPlans={isPT ? ptPlans.filter((p) => p.id !== x.plan_id) : []}
@@ -615,7 +641,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                                 </Grid>
                               </FormDialog>
                               )}
-                              <FormDialog title={isPT ? "Edit PT package" : "Edit membership"} trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={updateMembership}>
+                              <FormDialog title={isPT ? "Edit PT package" : "Edit membership"} trigger={<><Pencil size={14} /> Edit</>} triggerClass="btn-ghost btn-sm" action={updateMembership}>
                                 <Hidden name="id" value={x.id} />
                                 <Hidden name="kind" value={x.kind} />
                                 <Grid>
@@ -654,8 +680,9 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                                 confirmText="This only works if no payments were made against it. Otherwise edit it and set Status to Cancelled."
                                 successMessage="Deleted"
                               >
-                                <Trash2 size={14} />
+                                <Trash2 size={14} /> Delete
                               </ActionButton>
+                            </RowMenu>
                             </div>
                           )}
                         </div>
@@ -755,7 +782,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
           )}
 
           {tab === "attendance" && (
-            <Card bodyClass="" title={attendance.length ? `Last ${attendance.length} visits` : "Visits"}>
+            <Card bodyClass="" title={attendance.length ? `Last ${plural(attendance.length, "visit")}` : "Visits"}>
               {!attendance.length ? (
                 <Empty>No check-ins yet.</Empty>
               ) : (
@@ -863,6 +890,7 @@ export default async function MemberPage(props: PageProps<"/members/[id]">) {
                                     successMessage="Deleted"
                                   >
                                     <Trash2 size={14} />
+                                    <span className="sm:sr-only">Delete</span>
                                   </ActionButton>
                                 )}
                               </td>

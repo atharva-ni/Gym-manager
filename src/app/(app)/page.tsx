@@ -47,7 +47,7 @@ export default async function DashboardPage() {
   const dow = new Date(`${today}T12:00:00Z`).getUTCDay();
   const sb = await createClient();
 
-  const [statsRes, financeRes, expiringRes, paymentsRes, classesRes, birthdaysRes] = await Promise.all([
+  const [statsRes, financeRes, expiringRes, paymentsRes, classesRes, birthdaysRes, closeRes] = await Promise.all([
     sb.rpc("dashboard_stats", {
       p_today: today,
       p_alert_days: settings.expiry_alert_days,
@@ -67,6 +67,7 @@ export default async function DashboardPage() {
     sb.from("payments").select("*, members(full_name, member_code)").order("created_at", { ascending: false }).limit(6),
     sb.from("classes").select("*, trainers(full_name)").eq("day_of_week", dow).eq("is_active", true).order("start_time"),
     sb.rpc("birthdays_on", { p_day: today }).select("id, full_name, phone"),
+    sb.rpc("day_close", { p_day: today }),
   ]);
 
   const s = (statsRes.data ?? {}) as Partial<DashStats>;
@@ -83,7 +84,7 @@ export default async function DashboardPage() {
   const birthdays = (birthdaysRes.data ?? []) as { id: string; full_name: string; phone: string | null }[];
 
   const alerts = [
-    { label: "Renewals due (gym + PT)", value: n("renewals_due"), href: "/payments?tab=expiring", icon: CalendarClock, tone: "warn" as const },
+    { label: "Renewals due", value: n("renewals_due"), href: "/payments?tab=expiring", icon: CalendarClock, tone: "warn" as const },
     { label: "Expired", value: n("expired"), href: "/members?filter=expired", icon: AlertTriangle, tone: "bad" as const },
     { label: `Pending dues${n("dues_overdue") ? ` · ${n("dues_overdue")} overdue` : ""}`, value: money(n("dues_total"), currency), raw: n("dues_total"), href: "/payments?tab=dues", icon: Wallet, tone: "warn" as const },
     { label: "Lead follow-ups", value: n("followups_due"), href: "/leads?view=due", icon: UserPlus, tone: "brand" as const },
@@ -125,6 +126,19 @@ export default async function DashboardPage() {
         />
       </div>
 
+      {/* Today's money by mode, for the end-of-day count */}
+      {(closeRes.data ?? []).length > 0 && (
+        <Link href="/payments?tab=close" className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-line bg-surface px-4 py-2.5 text-sm hover:bg-surface-2">
+          <span className="font-medium text-ink">Today in hand</span>
+          {((closeRes.data ?? []) as { method: string; net: number }[]).map((r) => (
+            <span key={r.method} className="text-ink-2">
+              {label(r.method)} <span className="font-medium tabular-nums text-ink">{money(r.net, currency)}</span>
+            </span>
+          ))}
+          <span className="ml-auto text-brand">Day close</span>
+        </Link>
+      )}
+
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         {alerts.map((a) => {
           const active = (a.raw ?? Number(a.value)) > 0;
@@ -136,20 +150,28 @@ export default async function DashboardPage() {
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-lg font-semibold tabular-nums leading-tight">{a.value}</span>
-                <span className="block truncate text-xs text-muted">{a.label}</span>
+                <span className="block text-xs leading-tight text-muted">{a.label}</span>
               </span>
             </Link>
           );
         })}
       </div>
 
-      <div className="mb-6 grid gap-6 xl:grid-cols-3">
+      <div className="mb-6 grid gap-6 xl:grid-cols-3 xl:items-start">
         <Card title="Revenue vs expenses · last 6 months" className="xl:col-span-2" action={<Link href="/reports" className="text-xs text-brand">Full report →</Link>}>
           <RevenueExpenseChart data={finance} currency={currency} />
         </Card>
         <Card title="Today’s classes" bodyClass="" action={<Link href="/classes" className="text-xs text-brand">Schedule →</Link>}>
           {!classes.length ? (
-            <Empty>No classes scheduled today.</Empty>
+            <Empty
+              action={
+                <Link href="/classes" className="btn-secondary btn-sm">
+                  Add a class
+                </Link>
+              }
+            >
+              No classes scheduled today.
+            </Empty>
           ) : (
             <ul className="divide-y divide-line">
               {classes.map((c) => (
@@ -213,7 +235,7 @@ export default async function DashboardPage() {
                       );
                       return wa ? (
                         <a href={wa} target="_blank" rel="noreferrer" className="btn-ghost btn-sm text-good" title="Send renewal reminder on WhatsApp">
-                          <MessageCircle size={14} />
+                          <MessageCircle size={14} /> Remind
                         </a>
                       ) : null;
                     })()}

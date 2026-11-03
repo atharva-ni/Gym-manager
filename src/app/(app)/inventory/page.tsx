@@ -26,8 +26,8 @@ function ProductFields({ p }: { p?: Product }) {
         <Field label="SKU / barcode" name="sku" defaultValue={p?.sku ?? ""} />
         <SelectField label="Category" name="category" defaultValue={p?.category ?? "supplement"} options={options(PRODUCT_CATEGORIES)} />
         <Field label="Selling price" name="price" type="number" step="0.01" min={0} defaultValue={p?.price} required />
-        <Field label="Unit cost" name="cost" type="number" step="0.01" min={0} defaultValue={p?.cost ?? 0} />
-        <Field label={p ? "Stock on hand" : "Opening stock"} name="stock" type="number" defaultValue={p?.stock ?? 0} />
+        <Field label="Unit cost" name="cost" type="number" step="0.01" min={0} defaultValue={p?.cost ?? 0} hint="What you pay per unit (for profit)." />
+        <Field label={p ? "Stock on hand" : "Opening stock"} name="stock" type="number" defaultValue={p?.stock ?? 0} hint="Units in stock now." />
         <Field label="Low-stock alert at" name="low_stock_level" type="number" min={0} defaultValue={p?.low_stock_level ?? 5} />
       </Grid>
       <Checkbox label="Available for sale" name="is_active" defaultChecked={p?.is_active ?? true} />
@@ -124,7 +124,7 @@ export default async function InventoryPage(props: PageProps<"/inventory">) {
       {tab === "products" ? (
         <Card bodyClass="">
           {!products.length ? (
-            <Empty>No products yet.</Empty>
+            <Empty>No products yet. Use + Product above to add supplements, drinks or merchandise.</Empty>
           ) : (
             <TableWrap>
               <table className="tbl">
@@ -163,7 +163,7 @@ export default async function InventoryPage(props: PageProps<"/inventory">) {
                         </td>
                         <td>
                           <div className="flex justify-end gap-1">
-                            <FormDialog title={`Restock ${p.name}`} trigger={<PackagePlus size={14} />} triggerClass="btn-ghost btn-sm" action={restockProduct} submitLabel="Add stock">
+                            <FormDialog title={`Restock ${p.name}`} trigger={<><PackagePlus size={14} /><span className="sm:sr-only">Restock</span></>} triggerClass="btn-ghost btn-sm" action={restockProduct} submitLabel="Add stock">
                               <Hidden name="id" value={p.id} />
                               <Grid>
                                 <Field label="Quantity received" name="quantity" type="number" min={1} required />
@@ -172,11 +172,12 @@ export default async function InventoryPage(props: PageProps<"/inventory">) {
                               </Grid>
                               <Checkbox label="Record the purchase as an expense" name="record_expense" defaultChecked />
                             </FormDialog>
-                            <FormDialog title="Edit product" trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={saveProduct}>
+                            <FormDialog title="Edit product" trigger={<><Pencil size={14} /><span className="sm:sr-only">Edit</span></>} triggerClass="btn-ghost btn-sm" action={saveProduct}>
                               <ProductFields p={p} />
                             </FormDialog>
                             <ActionButton action={deleteRecord.bind(null, "products", p.id)} confirmLabel="Delete product" confirmText={`Delete ${p.name}? Past sales are kept.`} successMessage="Product deleted">
                               <Trash2 size={14} />
+                              <span className="sm:sr-only">Delete</span>
                             </ActionButton>
                           </div>
                         </td>

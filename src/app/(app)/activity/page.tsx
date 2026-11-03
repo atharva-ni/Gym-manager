@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getSettings, requireOwner } from "@/lib/auth";
-import { dayBoundsUTC, fmtDate, fmtDateTime, money, todayISO } from "@/lib/format";
+import { dayBoundsUTC, fmtDate, fmtDateTime, money, plural, todayISO } from "@/lib/format";
 import { label } from "@/lib/constants";
 import { rangeParams } from "@/lib/queries";
 import { Badge, Card, Empty, PageHeader, TableWrap } from "@/components/ui";
@@ -39,6 +39,7 @@ const FIELDS: Record<string, "money" | "date" | "text"> = {
   paid_on: "date", start_date: "date", end_date: "date", balance_due_on: "date", status: "text",
   full_name: "text", phone: "text", plan_name: "text", sessions_total: "text", active: "text", member_id: "text",
   photo_path: "text", trainer_id: "text", spent_on: "date", vendor: "text", quantity: "text",
+  joined_on: "date", sessions_used: "text", duration_months: "text",
 };
 
 export default async function ActivityPage(props: PageProps<"/activity">) {
@@ -62,10 +63,17 @@ export default async function ActivityPage(props: PageProps<"/activity">) {
     .limit(300);
   if (type) query = query.eq("table_name", type);
   if (who === "staff" || who === "owner" || who === "system") query = query.eq("actor_role", who);
-  else if (who) query = query.eq("actor_email", who);
-  const [{ data, error }, { data: staffRows }] = await Promise.all([
+  else if (who === "everyone") {
+    // everything, including automatic changes
+  } else if (who) query = query.eq("actor_email", who);
+  else query = query.neq("actor_role", "system"); // default: what people did
+  // How many automatic changes (data fixes, updates) the default view hides
+  let hiddenQuery = sb.from("activity_log").select("id", { count: "exact", head: true }).eq("actor_role", "system").gte("at", range.start).lt("at", range.end);
+  if (type) hiddenQuery = hiddenQuery.eq("table_name", type);
+  const [{ data, error }, { data: staffRows }, { count: systemCount }] = await Promise.all([
     query,
     sb.from("staff_accounts").select("email, full_name").order("full_name"),
+    who ? Promise.resolve({ count: 0 }) : hiddenQuery,
   ]);
   const entries = (data ?? []) as Entry[];
   const staffName = new Map((staffRows ?? []).map((s) => [s.email.toLowerCase(), s.full_name as string]));
@@ -108,7 +116,8 @@ export default async function ActivityPage(props: PageProps<"/activity">) {
         <label>
           <span className="label">Done by</span>
           <select name="who" defaultValue={who} className="input w-auto">
-            <option value="">Anyone</option>
+            <option value="">Owner and staff</option>
+            <option value="everyone">Everyone, incl. automatic changes</option>
             <option value="owner">Owner</option>
             <option value="staff">All staff</option>
             {(staffRows ?? []).map((s) => (
@@ -116,15 +125,25 @@ export default async function ActivityPage(props: PageProps<"/activity">) {
                 {s.full_name}
               </option>
             ))}
-            <option value="system">System / SQL editor</option>
+            <option value="system">Automatic changes only</option>
           </select>
         </label>
       </DateRangeFilter>
 
-      {(voids > 0 || staffActions > 0) && (
+      {(voids > 0 || staffActions > 0 || !!systemCount) && (
         <p className="mb-4 text-sm text-ink-2">
-          {entries.length} entries{voids > 0 && <> · <span className="font-medium text-bad">{voids} voided</span></>}
+          {plural(entries.length, "entry", "entries")}
+          {voids > 0 && <> · <span className="font-medium text-bad">{voids} voided</span></>}
           {staffActions > 0 && <> · {staffActions} by staff</>}
+          {!!systemCount && (
+            <>
+              {" · "}
+              {plural(systemCount, "automatic change")} hidden{" "}
+              <Link href={`/activity?${new URLSearchParams({ from, to, ...(type ? { type } : {}), who: "everyone" })}`} className="text-brand hover:underline">
+                Show
+              </Link>
+            </>
+          )}
         </p>
       )}
 

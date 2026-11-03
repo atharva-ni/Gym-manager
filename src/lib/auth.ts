@@ -18,7 +18,7 @@ export type Access = {
 /**
  * The signed-in account and what it may do, or null. The database decides
  * (my_access): the owner is the account that owns the gym, staff are the
- * logins the owner added in Settings > Staff. Everyone else gets null.
+ * logins the owner gave on the Staff page. Everyone else gets null.
  */
 export const getAccess = cache(async (): Promise<Access | null> => {
   const supabase = await createClient();
@@ -63,6 +63,8 @@ const DEFAULT_SETTINGS: Omit<Settings, "owner_id"> = {
   expiry_alert_days: 7,
   freeze_max_days: null,
   freeze_fee: 0,
+  admission_fee: 0,
+  staff_max_discount_pct: null,
 };
 
 export const getSettings = cache(async (): Promise<Settings> => {

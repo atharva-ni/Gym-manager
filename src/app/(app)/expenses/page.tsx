@@ -145,7 +145,7 @@ export default async function ExpensesPage(props: PageProps<"/expenses">) {
         </label>
       </DateRangeFilter>
 
-      <div className="mb-6 grid gap-6 lg:grid-cols-3">
+      <div className="mb-6 grid gap-6 lg:grid-cols-3 lg:items-start">
         <div className="grid gap-4">
           <Stat label="Total spent in range" value={money(total, currency)} hint={`${fmtDate(from)} - ${fmtDate(to)}`} />
           <Stat label="Largest category" value={cats[0]?.label ?? "-"} hint={cats[0] ? money(cats[0].value, currency) : undefined} />
@@ -164,7 +164,7 @@ export default async function ExpensesPage(props: PageProps<"/expenses">) {
       )}
       <Card bodyClass="" className="mb-6">
         {!expenses.length ? (
-          <Empty>No expenses recorded.</Empty>
+          <Empty>No expenses in this period. Use Add expense above to record rent, salaries, bills and repairs.</Empty>
         ) : (
           <TableWrap>
             <table className="tbl">
@@ -195,7 +195,7 @@ export default async function ExpensesPage(props: PageProps<"/expenses">) {
                             <FileText size={14} />
                           </a>
                         )}
-                        <FormDialog title="Edit expense" trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={saveExpense} successMessage="Expense updated">
+                        <FormDialog title="Edit expense" trigger={<><Pencil size={14} /><span className="sm:sr-only">Edit</span></>} triggerClass="btn-ghost btn-sm" action={saveExpense} successMessage="Expense updated">
                           <ExpenseFields e={e} today={today} />
                         </FormDialog>
                         <ActionButton
@@ -205,6 +205,7 @@ export default async function ExpensesPage(props: PageProps<"/expenses">) {
                           successMessage="Expense deleted"
                         >
                           <Trash2 size={14} />
+                          <span className="sm:sr-only">Delete</span>
                         </ActionButton>
                       </div>
                     </td>
@@ -267,7 +268,7 @@ export default async function ExpensesPage(props: PageProps<"/expenses">) {
                     </td>
                     <td>
                       <div className="flex justify-end gap-1">
-                        <FormDialog title="Edit recurring expense" trigger={<Pencil size={14} />} triggerClass="btn-ghost btn-sm" action={saveRecurringExpense}>
+                        <FormDialog title="Edit recurring expense" trigger={<><Pencil size={14} /><span className="sm:sr-only">Edit</span></>} triggerClass="btn-ghost btn-sm" action={saveRecurringExpense}>
                           <RecurringFields r={r} trainers={trainers ?? []} />
                         </FormDialog>
                         <ActionButton
@@ -277,6 +278,7 @@ export default async function ExpensesPage(props: PageProps<"/expenses">) {
                           successMessage="Deleted"
                         >
                           <Trash2 size={14} />
+                          <span className="sm:sr-only">Delete</span>
                         </ActionButton>
                       </div>
                     </td>
