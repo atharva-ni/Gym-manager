@@ -7,7 +7,7 @@ function Mark({ name, logoUrl }: { name: string; logoUrl: string | null }) {
     <>
       {logoUrl ? (
         // eslint-disable-next-line @next/next/no-img-element -- logo from storage
-        <img src={logoUrl} alt="" className="mb-3 size-14 rounded-xl object-contain" />
+        <img src={logoUrl} alt="" className="mb-3 size-16 object-contain" />
       ) : (
         <span className="mb-3 rounded-xl bg-brand p-3 text-brand-ink">
           <Dumbbell size={26} />

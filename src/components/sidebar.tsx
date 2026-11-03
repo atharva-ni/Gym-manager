@@ -109,7 +109,7 @@ export function Sidebar({
         <Link href={home} className="flex min-w-0 items-center gap-2 font-semibold">
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- logo from storage
-            <img src={logoUrl} alt="" className="size-7 rounded-lg object-contain" />
+            <img src={logoUrl} alt="" className="size-8 object-contain" />
           ) : (
             <span className="rounded-lg bg-brand p-1.5 text-white">
               <Dumbbell size={16} />
@@ -134,7 +134,7 @@ export function Sidebar({
           <Link href={home} className="flex min-w-0 items-center gap-2.5" onClick={() => setOpen(false)}>
             {logoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element -- logo from storage
-              <img src={logoUrl} alt="" className="size-8 rounded-lg bg-white object-contain p-0.5" />
+              <img src={logoUrl} alt="" className="size-9 object-contain" />
             ) : (
               <span className="rounded-lg bg-brand p-1.5 text-white">
                 <Dumbbell size={18} />

@@ -57,10 +57,10 @@ export default async function SettingsPage() {
           <ActionForm action={saveGymProfile} successMessage="Gym profile saved.">
             <p className="text-sm text-muted">Shown on printed receipts, the receipt links you send on WhatsApp and the sign-in screen.</p>
             <div className="flex items-center gap-4">
-              <span className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-line bg-surface-2">
+              <span className={`flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-xl ${logo ? "" : "border border-dashed border-line"}`}>
                 {logo ? (
                   // eslint-disable-next-line @next/next/no-img-element -- logo from storage
-                  <img src={logo} alt="Gym logo" className="size-full object-contain p-1" />
+                  <img src={logo} alt="Gym logo" className="size-full object-contain" />
                 ) : (
                   <span className="text-xs text-muted">No logo</span>
                 )}

@@ -9,7 +9,7 @@ import { ActionButton, FormDialog, ViewDialog } from "@/components/forms";
 import { Field, Grid, Hidden, SelectField, TextArea } from "@/components/fields";
 import { GeneratedPassword } from "@/components/generated-password";
 import { deleteRecord } from "@/app/actions";
-import { addStaff, deleteStaffLogin, paySalary, saveStaffLimit, saveTrainer, setStaffActive } from "./actions";
+import { addStaff, deleteStaffLogin, paySalary, resetStaffPassword, saveStaffLimit, saveTrainer, setStaffActive } from "./actions";
 
 export const metadata = { title: "Staff · SetFit Fitness" };
 
@@ -302,8 +302,21 @@ export default async function TrainersPage() {
                         </p>
                         <p className="break-all text-ink">{login.email}</p>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         {loginBadge(login)}
+                        <FormDialog
+                          title={`New password for ${t.full_name}`}
+                          trigger="Reset password"
+                          triggerClass="btn-secondary btn-sm"
+                          action={resetStaffPassword.bind(null, login.id)}
+                          submitLabel="Set password"
+                          successMessage="Password changed"
+                        >
+                          <p className="text-sm text-ink-2">
+                            They sign in with <span className="font-medium text-ink">{login.email}</span> and this password. No email is sent.
+                          </p>
+                          <GeneratedPassword name="password" label="New password" />
+                        </FormDialog>
                         {switchLogin(login)}
                       </div>
                     </>

@@ -170,7 +170,7 @@ test("upgrading an existing database: v1 -> 002 ... 012 (re-runnable)", async ()
     insert into public.payments (owner_id, member_id, membership_id, amount)
       select '${A}', member_id, id, 1000 from public.memberships;
   `);
-  for (const m of ["002_payments_and_pt", "003_receipts", "004_freeze_refunds_passes", "005_unfreeze_status", "006_operations", "007_performance_optimization", "008_member_photos", "009_staff_and_activity", "010_plan_options", "011_desk_fixes", "012_branding", "013_staff_link", "014_staff_delete"]) {
+  for (const m of ["002_payments_and_pt", "003_receipts", "004_freeze_refunds_passes", "005_unfreeze_status", "006_operations", "007_performance_optimization", "008_member_photos", "009_staff_and_activity", "010_plan_options", "011_desk_fixes", "012_branding", "013_staff_link", "014_staff_delete", "015_staff_password"]) {
     await db.exec(sql(`supabase/migrations/${m}.sql`));
     await db.exec(sql(`supabase/migrations/${m}.sql`)); // safe to run twice
   }
@@ -525,6 +525,8 @@ test("deleting a staff login removes their account too (never an owner's)", asyn
   const [st] = await a(`insert into staff_accounts (email, full_name) values ('desk@example.com', 'Ravi') returning id`);
   await as(db, S)(`select my_access()`); // signs in once: linked
   await assert.rejects(as(db, S)(`select delete_staff_login($1)`, [st.id]), /Only the owner/);
+  await assert.rejects(as(db, S)(`select set_staff_password($1, 'abcdefgh1')`, [st.id]), /Only the owner/);
+  await assert.rejects(a(`select set_staff_password($1, 'short')`, [st.id]), /at least 8/);
   await a(`select delete_staff_login($1)`, [st.id]);
   assert.equal((await a(`select count(*)::int n from staff_accounts`))[0].n, 0);
   const users = (await db.query(`select email from auth.users order by email`)).rows.map((u) => u.email);

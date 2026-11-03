@@ -4,6 +4,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { FormError, parseForm } from "@/lib/form";
 import { runMutation, saveRow } from "@/lib/mutations";
 import { getAccess } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
 import { siteUrl } from "@/lib/site";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "@/lib/types";
@@ -94,24 +95,39 @@ async function createLogin({
   if (email === access.user.email?.toLowerCase()) return { error: "That is your own (owner) email." };
   if (password.length < 8) return { error: "Use a temporary password of at least 8 characters." };
 
+  const sb = await createClient();
+  const ready = `${fullName} can sign in now with ${email} and the password shown.`;
+  // The owner sets the password directly (and the email counts as confirmed),
+  // so it works even if this email already had an account. Needs migration 015.
+  const setPassword = async (staffId: string) =>
+    (await sb.rpc("set_staff_password", { p_staff_id: staffId, p_password: password })).error;
+
   // Same email as an earlier staff login (e.g. someone deleted and added again):
   // switch that login back on and link it, instead of creating a second one
-  const sb0 = await createClient();
-  const { data: existing } = await sb0.from("staff_accounts").select("id, user_id").eq("email", email).maybeSingle();
+  const { data: existing } = await sb.from("staff_accounts").select("id").eq("email", email).maybeSingle();
+  let staffId: string;
   if (existing) {
-    const relinked = await runMutation((sb) =>
-      sb.from("staff_accounts").update({ active: true, trainer_id: trainerId, full_name: fullName.trim() }).eq("id", existing.id),
-    );
-    if (!relinked?.ok) return { error: relinked?.error ?? "Could not switch the login back on." };
-    return {
-      message: existing.user_id
-        ? `${email} already had a login; it's switched back on. ${fullName} signs in with their old password (or uses "Forgot password").`
-        : `${email} already had a login waiting; it's switched back on. ${fullName} signs in with the password they were first given (or uses "Forgot password").`,
-    };
+    const relinked = await sb
+      .from("staff_accounts")
+      .update({ active: true, trainer_id: trainerId, full_name: fullName.trim() })
+      .eq("id", existing.id);
+    if (relinked.error) return { error: relinked.error.message };
+    staffId = existing.id;
+    const err = await setPassword(staffId);
+    if (!err) {
+      revalidatePath("/", "layout");
+      return { message: ready };
+    }
+    // No sign-in account behind the old record: create one below
+    if (!/no sign-in account/i.test(err.message)) {
+      revalidatePath("/", "layout");
+      return { message: `${email} already had a login; it's switched back on. ${fullName} signs in with their old password (or uses "Forgot password").` };
+    }
+  } else {
+    const ins = await sb.from("staff_accounts").insert({ full_name: fullName.trim(), email, trainer_id: trainerId }).select("id").single();
+    if (ins.error) return { error: ins.error.message };
+    staffId = ins.data.id;
   }
-
-  const saved = await runMutation((sb) => sb.from("staff_accounts").insert({ full_name: fullName.trim(), email, trainer_id: trainerId }));
-  if (!saved?.ok) return { error: saved?.error ?? "Could not save the login." };
 
   const auth = createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -123,19 +139,25 @@ async function createLogin({
     options: { emailRedirectTo: `${site}/auth/confirm?next=/attendance`, data: { full_name: fullName } },
   });
   if (error) {
-    await runMutation((sb) => sb.from("staff_accounts").delete().eq("email", email));
+    if (!existing) await sb.from("staff_accounts").delete().eq("id", staffId);
     return {
       error: /not allowed|disabled/i.test(error.message)
         ? 'Supabase is not accepting new logins. One-time step: in Supabase, open Authentication > Sign In / Providers and turn on "Allow new users to sign up", then try again.'
-        : error.message,
+        : /rate limit/i.test(error.message)
+          ? 'Supabase is sending a confirmation email for each new login and has hit its email limit. One-time fix: in Supabase, open Authentication > Sign In / Providers > Email and turn off "Confirm email", then try again (no email is needed after that).'
+          : error.message,
     };
   }
+  revalidatePath("/", "layout");
+  // Make this password the one that works, and skip email confirmation
+  if (!(await setPassword(staffId))) return { message: ready };
+  // Before migration 015
   return {
     message:
       data.user && data.user.identities?.length === 0
         ? `${email} already has a login. ${fullName} can sign in with that password (or use "Forgot password") and will get staff access.`
         : data.session
-          ? `${fullName} can sign in now with ${email} and the temporary password.`
+          ? ready
           : `Login created. ${fullName} must click the confirmation link emailed to ${email}, then sign in with the temporary password.`,
   };
 }
@@ -168,4 +190,12 @@ export async function saveStaffLimit(_: ActionState, fd: FormData): Promise<Acti
 /** Delete an app login completely (sign-in account too), e.g. one left from a deleted staff member. */
 export async function deleteStaffLogin(id: string): Promise<ActionState> {
   return runMutation((sb) => sb.rpc("delete_staff_login", { p_staff_id: id }));
+}
+
+/** Give a staff member a new password (owner only; no email needed). */
+export async function resetStaffPassword(id: string, _: ActionState, fd: FormData): Promise<ActionState> {
+  const password = String(fd.get("password") ?? "");
+  if (password.length < 8) return { error: "Use a password of at least 8 characters." };
+  const res = await runMutation((sb) => sb.rpc("set_staff_password", { p_staff_id: id, p_password: password }));
+  return res?.ok ? { ...res, message: "Password changed. Send them the new one." } : res;
 }

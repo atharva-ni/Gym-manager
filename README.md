@@ -63,6 +63,7 @@ If you ran `schema.sql` before an update, run the new files in [`supabase/migrat
 11. `012_branding.sql` (gym logo, gym name on the sign-in screen)
 12. `013_staff_link.sql` (links staff logins to staff members; needed if you ran an early 010)
 13. `014_staff_delete.sql` (deleting a staff member removes their login completely; salary history stays)
+14. `015_staff_password.sql` (owner sets / resets staff passwords; no email verification for staff)
 
 Each one is safe to run again, but run them in order: an older file run after 009 would put back the old owner-only access rules (run 009 again to fix that). The app shows a "Database update needed" banner naming the file when a migration is missing.
 
