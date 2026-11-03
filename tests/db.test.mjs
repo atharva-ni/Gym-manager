@@ -170,7 +170,7 @@ test("upgrading an existing database: v1 -> 002 ... 012 (re-runnable)", async ()
     insert into public.payments (owner_id, member_id, membership_id, amount)
       select '${A}', member_id, id, 1000 from public.memberships;
   `);
-  for (const m of ["002_payments_and_pt", "003_receipts", "004_freeze_refunds_passes", "005_unfreeze_status", "006_operations", "007_performance_optimization", "008_member_photos", "009_staff_and_activity", "010_plan_options", "011_desk_fixes", "012_branding", "013_staff_link"]) {
+  for (const m of ["002_payments_and_pt", "003_receipts", "004_freeze_refunds_passes", "005_unfreeze_status", "006_operations", "007_performance_optimization", "008_member_photos", "009_staff_and_activity", "010_plan_options", "011_desk_fixes", "012_branding", "013_staff_link", "014_staff_delete"]) {
     await db.exec(sql(`supabase/migrations/${m}.sql`));
     await db.exec(sql(`supabase/migrations/${m}.sql`)); // safe to run twice
   }
@@ -518,4 +518,22 @@ test("desk fixes: joined follows the first plan, staff log PT sessions, day clos
   const close = await a(`select method, received::float, refunded::float, sales::float, net::float from day_close('2026-11-02')`);
   assert.deepEqual(close, [{ method: "cash", received: 2500, refunded: 200, sales: 40, net: 2340 }]);
   await assert.rejects(s(`select * from day_close('2026-11-02')`), /Only the owner/);
+});
+
+test("deleting a staff login removes their account too (never an owner's)", async () => {
+  const { db, a } = await setup();
+  const [st] = await a(`insert into staff_accounts (email, full_name) values ('desk@example.com', 'Ravi') returning id`);
+  await as(db, S)(`select my_access()`); // signs in once: linked
+  await assert.rejects(as(db, S)(`select delete_staff_login($1)`, [st.id]), /Only the owner/);
+  await a(`select delete_staff_login($1)`, [st.id]);
+  assert.equal((await a(`select count(*)::int n from staff_accounts`))[0].n, 0);
+  const users = (await db.query(`select email from auth.users order by email`)).rows.map((u) => u.email);
+  assert.deepEqual(users, ["other@example.com", "owner@example.com"], "staff account gone, owner kept");
+
+  // Deleting the staff member keeps their salary history (as expenses)
+  const [tr] = await a(`insert into trainers (full_name) values ('Ravi') returning id`);
+  await a(`insert into expenses (category, amount, trainer_id, vendor, description) values ('salary', 15000, $1, 'Ravi', 'Salary Oct 2026')`, [tr.id]);
+  await a(`delete from trainers where id = $1`, [tr.id]);
+  assert.deepEqual(await a(`select vendor, amount::float, trainer_id from expenses where category = 'salary'`),
+    [{ vendor: "Ravi", amount: 15000, trainer_id: null }]);
 });

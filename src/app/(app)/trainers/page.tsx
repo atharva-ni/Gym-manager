@@ -9,7 +9,7 @@ import { ActionButton, FormDialog, ViewDialog } from "@/components/forms";
 import { Field, Grid, Hidden, SelectField, TextArea } from "@/components/fields";
 import { GeneratedPassword } from "@/components/generated-password";
 import { deleteRecord } from "@/app/actions";
-import { addStaff, paySalary, saveStaffLimit, saveTrainer, setStaffActive } from "./actions";
+import { addStaff, deleteStaffLogin, paySalary, saveStaffLimit, saveTrainer, setStaffActive } from "./actions";
 
 export const metadata = { title: "Staff · SetFit Fitness" };
 
@@ -198,6 +198,16 @@ export default async function TrainersPage() {
                 <div className="flex items-center gap-2">
                   {loginBadge(l)}
                   {switchLogin(l)}
+                  <ActionButton
+                    action={deleteStaffLogin.bind(null, l.id)}
+                    confirmLabel="Delete login"
+                    confirmText={`Delete the app login ${l.email} completely? They can't sign in any more, and the email can be used again. Past actions stay in the activity log.`}
+                    successMessage="Login deleted"
+                    title="Delete login"
+                  >
+                    <Trash2 size={14} />
+                    <span className="sm:sr-only">Delete</span>
+                  </ActionButton>
                 </div>
               </li>
             ))}
@@ -394,7 +404,7 @@ export default async function TrainersPage() {
                     <ActionButton
                       action={deleteRecord.bind(null, "trainers", t.id)}
                       confirmLabel="Delete staff member"
-                      confirmText={`Delete ${t.full_name}? Their members, PT clients and classes will be unassigned, and their app login is switched off. To keep their history, edit them and set Status to Inactive instead.`}
+                      confirmText={`Delete ${t.full_name}? Their app login is deleted and their members, PT clients and classes are unassigned. Salary payouts stay in Expenses. To keep their history, edit them and set Status to Inactive instead.`}
                       successMessage="Staff member deleted"
                       title="Delete staff member"
                     >

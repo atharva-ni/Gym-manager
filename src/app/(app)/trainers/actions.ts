@@ -5,6 +5,7 @@ import { FormError, parseForm } from "@/lib/form";
 import { runMutation, saveRow } from "@/lib/mutations";
 import { getAccess } from "@/lib/auth";
 import { siteUrl } from "@/lib/site";
+import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "@/lib/types";
 
 /**
@@ -93,6 +94,22 @@ async function createLogin({
   if (email === access.user.email?.toLowerCase()) return { error: "That is your own (owner) email." };
   if (password.length < 8) return { error: "Use a temporary password of at least 8 characters." };
 
+  // Same email as an earlier staff login (e.g. someone deleted and added again):
+  // switch that login back on and link it, instead of creating a second one
+  const sb0 = await createClient();
+  const { data: existing } = await sb0.from("staff_accounts").select("id, user_id").eq("email", email).maybeSingle();
+  if (existing) {
+    const relinked = await runMutation((sb) =>
+      sb.from("staff_accounts").update({ active: true, trainer_id: trainerId, full_name: fullName.trim() }).eq("id", existing.id),
+    );
+    if (!relinked?.ok) return { error: relinked?.error ?? "Could not switch the login back on." };
+    return {
+      message: existing.user_id
+        ? `${email} already had a login; it's switched back on. ${fullName} signs in with their old password (or uses "Forgot password").`
+        : `${email} already had a login waiting; it's switched back on. ${fullName} signs in with the password they were first given (or uses "Forgot password").`,
+    };
+  }
+
   const saved = await runMutation((sb) => sb.from("staff_accounts").insert({ full_name: fullName.trim(), email, trainer_id: trainerId }));
   if (!saved?.ok) return { error: saved?.error ?? "Could not save the login." };
 
@@ -146,4 +163,9 @@ export async function saveStaffLimit(_: ActionState, fd: FormData): Promise<Acti
     if (cap !== null && (Number(cap) < 0 || Number(cap) > 100)) throw new FormError("The limit must be between 0 and 100%");
     return sb.from("gym_settings").upsert({ staff_max_discount_pct: cap }, { onConflict: "owner_id" });
   });
+}
+
+/** Delete an app login completely (sign-in account too), e.g. one left from a deleted staff member. */
+export async function deleteStaffLogin(id: string): Promise<ActionState> {
+  return runMutation((sb) => sb.rpc("delete_staff_login", { p_staff_id: id }));
 }

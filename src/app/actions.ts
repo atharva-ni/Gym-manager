@@ -20,15 +20,22 @@ const DELETABLE = new Set([
   "classes", "expenses", "products", "equipment", "leads", "recurring_expenses",
 ]);
 
-/** Owner only. Expenses take their bill photo with them; staff members' logins are switched off. */
+/** Owner only. Expenses take their bill photo with them; staff members take their app login (salary history stays). */
 export async function deleteRecord(table: string, id: string): Promise<ActionState> {
   if (!DELETABLE.has(table)) return { error: "Not allowed" };
   if ((await getAccess())?.role !== "owner") return { error: "Only the gym owner can delete records." };
   return runMutation(async (sb) => {
     if (table === "trainers") {
-      // A deleted staff member can't keep using their app login
-      const off = await sb.from("staff_accounts").update({ active: false }).eq("trainer_id", id);
-      if (off.error) return off;
+      // Their app login goes completely (sign-in account too); salary payouts
+      // stay as expenses. Before migration 014: just switch the login off.
+      const { data: login } = await sb.from("staff_accounts").select("id").eq("trainer_id", id).maybeSingle();
+      if (login) {
+        const del = await sb.rpc("delete_staff_login", { p_staff_id: login.id });
+        if (del.error) {
+          const off = await sb.from("staff_accounts").update({ active: false }).eq("id", login.id);
+          if (off.error) return off;
+        }
+      }
     }
     if (table !== "expenses") return sb.from(table).delete().eq("id", id);
     const { data, error } = await sb.from("expenses").delete().eq("id", id).select("bill_path");

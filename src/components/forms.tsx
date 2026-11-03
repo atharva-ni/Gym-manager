@@ -1,6 +1,9 @@
 "use client";
 
-import { Fragment, isValidElement, useActionState, useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import {
+  createContext, Fragment, isValidElement, startTransition, useActionState, useContext, useEffect, useRef, useState, useTransition,
+  type FormEvent, type ReactNode,
+} from "react";
 import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
@@ -9,13 +12,30 @@ import { toast } from "@/components/toaster";
 
 type FormAction = (state: ActionState, formData: FormData) => Promise<ActionState>;
 
+/** "Saving" state of the ActionForm / FormDialog around a SubmitButton. */
+const Pending = createContext(false);
+
 export function SubmitButton({ children, className = "btn-primary" }: { children: ReactNode; className?: string }) {
   const { pending } = useFormStatus();
+  const busy = useContext(Pending) || pending;
   return (
-    <button type="submit" disabled={pending} className={className}>
-      {pending ? "Saving…" : children}
+    <button type="submit" disabled={busy} className={className}>
+      {busy ? "Saving…" : children}
     </button>
   );
+}
+
+/**
+ * Submit a form to its action without React clearing the fields afterwards
+ * (React resets forms after every submit, so a validation error would wipe
+ * what was typed). Forms that should clear on success do it themselves.
+ */
+function keepFields(formAction: (fd: FormData) => void) {
+  return (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget, (e.nativeEvent as SubmitEvent).submitter);
+    startTransition(() => formAction(fd));
+  };
 }
 
 function ErrorNote({ state }: { state: ActionState }) {
@@ -71,7 +91,7 @@ export function FormDialog({
   wide?: boolean | "xl";
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [state, formAction] = useActionState(action, null);
+  const [state, formAction, saving] = useActionState(action, null);
   const [formKey, setFormKey] = useState(0);
   // The result already seen when the dialog was last opened; older errors stay hidden.
   const [seen, setSeen] = useState<ActionState>(null);
@@ -107,7 +127,8 @@ export function FormDialog({
         aria-label={title}
         className={sheet(wide === "xl" ? "sm:max-w-5xl" : wide ? "sm:max-w-2xl" : "sm:max-w-lg")}
       >
-        <form key={formKey} action={formAction} className={sheetBody}>
+        <form key={formKey} onSubmit={keepFields(formAction)} className={sheetBody}>
+          <Pending.Provider value={saving}>
           <header className="flex items-center justify-between border-b border-line px-5 py-3.5">
             <h2 className="font-semibold">{title}</h2>
             <button type="button" className="btn-ghost btn-sm" onClick={() => ref.current?.close()} aria-label="Close">
@@ -124,6 +145,7 @@ export function FormDialog({
             </button>
             <SubmitButton className="btn-primary flex-1 sm:flex-none">{submitLabel}</SubmitButton>
           </footer>
+          </Pending.Provider>
         </form>
       </dialog>
     </>
@@ -144,7 +166,7 @@ export function ActionForm({
   successMessage?: string;
   resetOnSuccess?: boolean;
 }) {
-  const [state, formAction] = useActionState(action, null);
+  const [state, formAction, saving] = useActionState(action, null);
   const ref = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
@@ -155,9 +177,11 @@ export function ActionForm({
   }, [state, resetOnSuccess, successMessage]);
 
   return (
-    <form ref={ref} action={formAction} className={className}>
-      <ErrorNote state={state} />
-      {children}
+    <form ref={ref} onSubmit={keepFields(formAction)} className={className}>
+      <Pending.Provider value={saving}>
+        <ErrorNote state={state} />
+        {children}
+      </Pending.Provider>
     </form>
   );
 }
