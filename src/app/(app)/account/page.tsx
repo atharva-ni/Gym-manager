@@ -1,36 +1,52 @@
+import { LogOut } from "lucide-react";
 import { requireAccess } from "@/lib/auth";
-import { STAFF_CAN, STAFF_CANNOT } from "@/lib/constants";
-import { Card, PageHeader } from "@/components/ui";
+import { Avatar, Badge, Card, PageHeader } from "@/components/ui";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { PasswordField } from "@/components/password-field";
+import { signOut } from "@/app/actions";
 import { changePassword } from "../settings/actions";
 
 export const metadata = { title: "My account · SetFit Fitness" };
 
-/** Staff: their own login. (The owner manages everything in Settings.) */
+/** Your own login: who you're signed in as, change password, sign out. */
 export default async function AccountPage() {
   const { user, role, name } = await requireAccess();
+  const displayName = name ?? "Owner";
   return (
-    <>
-      <PageHeader title="My account" description={role === "staff" ? "Your staff login." : "Your login. Gym settings are under Settings."} />
-      <div className="grid max-w-3xl gap-6 md:grid-cols-2">
-        <Card title="Signed in as">
-          <p className="font-medium text-ink">{name ?? "Owner"}</p>
-          <p className="text-sm text-muted">{user.email}</p>
-          <p className="mt-3 text-xs text-muted">
-            {role === "staff"
-              ? `${STAFF_CAN} ${STAFF_CANNOT} Ask the owner to change your email or access.`
-              : "Full access."}
-          </p>
-        </Card>
-        <Card title="Change password">
+    <div className="mx-auto max-w-xl">
+      <PageHeader title="My account" />
+      <Card bodyClass="">
+        <div className="flex items-center gap-4 p-5">
+          <Avatar name={displayName} size="lg" />
+          <div className="min-w-0 flex-1">
+            <p className="flex flex-wrap items-center gap-2 text-lg font-semibold text-ink">
+              {displayName}
+              <Badge tone={role === "owner" ? "brand" : "neutral"}>{role === "owner" ? "Owner" : "Staff"}</Badge>
+            </p>
+            <p className="break-all text-sm text-muted">{user.email}</p>
+          </div>
+        </div>
+
+        <div className="border-t border-line p-5">
+          <h2 className="mb-4 text-sm font-semibold text-ink">Change password</h2>
           <ActionForm action={changePassword} successMessage="Password updated." resetOnSuccess>
             <PasswordField label="New password" name="password" autoComplete="new-password" minLength={8} />
             <PasswordField label="Confirm password" name="confirm" autoComplete="new-password" minLength={8} />
-            <SubmitButton className="btn-secondary w-full">Update password</SubmitButton>
+            <div className="flex justify-end">
+              <SubmitButton>Update password</SubmitButton>
+            </div>
           </ActionForm>
-        </Card>
-      </div>
-    </>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-line p-5">
+          <p className="text-sm text-muted">{role === "staff" ? "To change your email, ask the gym owner." : "Gym details are in Settings."}</p>
+          <form action={signOut}>
+            <button className="btn-secondary">
+              <LogOut size={16} /> Sign out
+            </button>
+          </form>
+        </div>
+      </Card>
+    </div>
   );
 }

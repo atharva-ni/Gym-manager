@@ -7,7 +7,7 @@ import type { Trainer } from "@/lib/types";
 import { Avatar, Badge, Card, Empty, PageHeader, Stat, StatusBadge } from "@/components/ui";
 import { ActionButton, FormDialog, ViewDialog } from "@/components/forms";
 import { Field, Grid, Hidden, SelectField, TextArea } from "@/components/fields";
-import { PasswordField } from "@/components/password-field";
+import { GeneratedPassword } from "@/components/generated-password";
 import { deleteRecord } from "@/app/actions";
 import { addStaff, paySalary, saveStaffLimit, saveTrainer, setStaffActive } from "./actions";
 
@@ -24,7 +24,15 @@ function TrainerFields({ t, today }: { t?: Trainer; today: string }) {
         <Field label="Full name" name="full_name" defaultValue={t?.full_name} required />
         <Field label="Role" name="role" defaultValue={t?.role ?? "Trainer"} list="staff-roles" required />
         <Field label="Phone" name="phone" type="tel" defaultValue={t?.phone ?? ""} />
-        <Field label="Email" name="email" type="email" defaultValue={t?.email ?? ""} />
+        <Field
+          label={t ? "Email" : "Email (their login)"}
+          name="email"
+          type="email"
+          autoComplete="off"
+          defaultValue={t?.email ?? ""}
+          required={!t}
+          hint={t ? undefined : "They sign in to the app with this email."}
+        />
         <Field label="Specialization" name="specialization" defaultValue={t?.specialization ?? ""} placeholder="Strength, Yoga, CrossFit…" />
         <Field label="Monthly salary" name="salary" type="number" step="0.01" min={0} defaultValue={t?.salary ?? 0} />
         <Field
@@ -49,13 +57,7 @@ function TrainerFields({ t, today }: { t?: Trainer; today: string }) {
       {!t && (
         <div className="space-y-3 rounded-lg border border-line p-3">
           <p className="text-sm font-medium text-ink">App login</p>
-          <Grid>
-            <Field label="Login email" name="login_email" type="email" autoComplete="off" hint="Can be the same as their email above." required />
-            <PasswordField label="Temporary password" name="login_password" autoComplete="new-password" minLength={8} />
-          </Grid>
-          <p className="text-xs text-muted">
-            Give them this email and password; they can change the password under My account. {STAFF_CAN} {STAFF_CANNOT}
-          </p>
+          <GeneratedPassword name="login_password" />
         </div>
       )}
     </>
@@ -312,10 +314,7 @@ export default async function TrainersPage() {
                           <Hidden name="trainer_id" value={t.id} />
                           <Hidden name="full_name" value={t.full_name} />
                           <Field label="Login email" name="email" type="email" autoComplete="off" defaultValue={t.email ?? ""} required />
-                          <PasswordField label="Temporary password" name="password" autoComplete="new-password" minLength={8} />
-                          <p className="text-xs text-muted">
-                            Give them the email and temporary password; they can change it under My account. {STAFF_CAN} {STAFF_CANNOT}
-                          </p>
+                          <GeneratedPassword name="password" />
                         </FormDialog>
                       )}
                     </>

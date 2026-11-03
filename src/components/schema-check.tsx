@@ -10,7 +10,7 @@ export async function SchemaCheck() {
     return null;
   }
   const sb = await createClient();
-  const [ms, pay, v4, v6, v8, v9, v10, v11, v12] = await Promise.all([
+  const [ms, pay, v4, v6, v8, v9, v10, v11, v12, v13] = await Promise.all([
     sb.from("memberships").select("kind, balance_due_on, sessions_used").limit(1),
     sb.from("payments").select("receipt_no").limit(1),
     sb.from("refunds").select("id").limit(1),
@@ -20,10 +20,11 @@ export async function SchemaCheck() {
     sb.from("plans").select("duration_months").limit(1),
     sb.rpc("day_close", { p_day: "2000-01-01" }),
     sb.from("gym_settings").select("logo_path").limit(1),
+    sb.from("staff_accounts").select("trainer_id").limit(1),
   ]);
   // day_close refuses staff; only a missing function means 011 isn't run
   const missing011 = v11.error && (v11.error.code === "PGRST202" || v11.error.code === "42883") ? v11.error : null;
-  const error = ms.error ?? pay.error ?? v4.error ?? v6.error ?? v8.error ?? v9.error ?? v10.error ?? missing011 ?? v12.error;
+  const error = ms.error ?? pay.error ?? v4.error ?? v6.error ?? v8.error ?? v9.error ?? v10.error ?? missing011 ?? v12.error ?? v13.error;
   if (!error) return null;
   const pending = ms.error
     ? "002_payments_and_pt.sql, then 003_receipts.sql, then 004_freeze_refunds_passes.sql"
@@ -41,7 +42,9 @@ export async function SchemaCheck() {
                 ? "010_plan_options.sql (after 009_staff_and_activity.sql), then 011_desk_fixes.sql"
                 : missing011
                   ? "011_desk_fixes.sql (after 010_plan_options.sql), then 012_branding.sql"
-                  : "012_branding.sql (after 011_desk_fixes.sql)";
+                  : v12.error
+                    ? "012_branding.sql (after 011_desk_fixes.sql), then 013_staff_link.sql"
+                    : "013_staff_link.sql";
 
   const missingTable = error.code === "42P01" || /relation .* does not exist/i.test(error.message);
   return (

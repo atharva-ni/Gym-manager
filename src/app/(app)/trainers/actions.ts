@@ -14,11 +14,12 @@ import type { ActionState } from "@/lib/types";
 export async function saveTrainer(_: ActionState, fd: FormData): Promise<ActionState> {
   const id = String(fd.get("id") ?? "");
   const out = { id, name: "" };
-  const loginEmail = String(fd.get("login_email") ?? "").trim().toLowerCase();
+  // Their email is also their login
+  const loginEmail = String(fd.get("email") ?? "").trim().toLowerCase();
   const loginPassword = String(fd.get("login_password") ?? "");
   if (!id) {
     // Check the login details first, so nothing is saved for a typo
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail)) return { error: "Enter a valid login email." };
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail)) return { error: "Enter their email: it's their app login." };
     if (loginPassword.length < 8) return { error: "Use a temporary password of at least 8 characters." };
   }
   const res = await runMutation(async (sb) => {

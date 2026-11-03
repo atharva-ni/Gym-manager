@@ -170,7 +170,7 @@ test("upgrading an existing database: v1 -> 002 ... 012 (re-runnable)", async ()
     insert into public.payments (owner_id, member_id, membership_id, amount)
       select '${A}', member_id, id, 1000 from public.memberships;
   `);
-  for (const m of ["002_payments_and_pt", "003_receipts", "004_freeze_refunds_passes", "005_unfreeze_status", "006_operations", "007_performance_optimization", "008_member_photos", "009_staff_and_activity", "010_plan_options", "011_desk_fixes", "012_branding"]) {
+  for (const m of ["002_payments_and_pt", "003_receipts", "004_freeze_refunds_passes", "005_unfreeze_status", "006_operations", "007_performance_optimization", "008_member_photos", "009_staff_and_activity", "010_plan_options", "011_desk_fixes", "012_branding", "013_staff_link"]) {
     await db.exec(sql(`supabase/migrations/${m}.sql`));
     await db.exec(sql(`supabase/migrations/${m}.sql`)); // safe to run twice
   }
